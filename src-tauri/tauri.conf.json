@@ -45,6 +45,9 @@
         "type": "fixedRuntime",
         "path": "./Microsoft.WebView2.FixedVersionRuntime.151.0.4129.107.x64/"
       }
+    },
+    "resources": {
+      "target/release/WebView2Loader.dll": "./"
     }
   }
 }
