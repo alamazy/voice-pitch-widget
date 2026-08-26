@@ -102,9 +102,18 @@ npx tauri icon chemin/vers/un-logo.png
 - **AGC activé** : Ajustement automatique du gain micro sans biais sur la fréquence
 
 ### Points d'attention
-- **macOS** : L'accès au micro nécessite `NSMicrophoneUsageDescription` dans `Info.plist` (géré automatiquement par Tauri 2.x)
-- **Précision** : L'autocorrélation donne de bons résultats sur voix propre, peut se tromper d'octave sur signaux bruités
-- **Performance** : FFT 8192 = calcul O(n²) DFT, optimisé par calcul ciblé et intervalles espacés
+
+#### Windows WebView2
+L'application nécessite WebView2 Runtime. La configuration `fixedRuntime` nécessite le téléchargement préalable de WebView2 fixed version sur le site de Microsoft https://developer.microsoft.com/en-us/microsoft-edge/webview2/#download-section puis la décompresser avec la commande suivante: `Expand .\Microsoft.WebView2.FixedVersionRuntime.128.0.2739.42.x64.cab -F:* ./src-tauri`
+
+#### macOS
+L'accès au micro nécessite `NSMicrophoneUsageDescription` dans `Info.plist` (géré automatiquement par Tauri 2.x)
+
+#### Précision
+L'autocorrélation donne de bons résultats sur voix propre, peut se tromper d'octave sur signaux bruités
+
+#### Performance
+FFT 8192 = calcul O(n²) DFT, optimisé par calcul ciblé et intervalles espacés
 
 ## Pistes d'évolution
 

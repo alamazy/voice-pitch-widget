@@ -22,7 +22,8 @@
         "resizable": true,
         "skipTaskbar": true,
         "shadow": false,
-        "center": true
+        "center": true,
+        "devtools": true
       }
     ],
     "security": {
@@ -38,6 +39,13 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "fixedRuntime",
+        "path": "./Microsoft.WebView2.FixedVersionRuntime.151.0.4129.107.x64/"
+      }
+    }
   }
 }
+  

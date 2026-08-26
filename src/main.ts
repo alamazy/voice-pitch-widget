@@ -157,6 +157,7 @@ const smoother = new MedianSmoother(5);
 
 async function startListening() {
   try {
+    console.log("Starting audio analysis...");
     mediaStream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: false,
@@ -168,12 +169,18 @@ async function startListening() {
         autoGainControl: true,
       },
     });
+    console.log("Microphone access granted");
 
     audioContext = new AudioContext();
+    console.log("AudioContext created, sample rate:", audioContext.sampleRate);
+    
+    console.log("Loading AudioWorklet module...");
     await audioContext.audioWorklet.addModule("/pitch-processor.js");
+    console.log("AudioWorklet module loaded");
 
     const source = audioContext.createMediaStreamSource(mediaStream);
     workletNode = new AudioWorkletNode(audioContext, "pitch-processor");
+    console.log("AudioWorkletNode created");
 
     workletNode.port.onmessage = (event: MessageEvent<{ frequency: number; spectrum?: number[] }>) => {
       const { frequency, spectrum } = event.data;
@@ -240,6 +247,7 @@ async function startListening() {
     isRunning = true;
     toggleBtn.textContent = "Arrêter";
     statusEl.textContent = "";
+    console.log("Listening started successfully!");
   } catch (err) {
     console.error("Impossible d'accéder au micro :", err);
     statusEl.textContent = "Erreur d'accès au micro";

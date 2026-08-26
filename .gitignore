@@ -4,3 +4,5 @@ src-tauri/target
 src-tauri/gen
 src-tauri/Cargo.lock
 package-lock.json
+Microsoft.WebView2.*
+src-tauri/Microsoft.WebView2.*
