@@ -107,6 +107,7 @@ body {
 .setting-row {
   display: flex;
   flex-direction: row;
+  align-items: center;
   gap: 2px;
   font-size: 10px;
   color: #ccc;
@@ -122,6 +123,27 @@ body {
   align-self: baseline;
   font-size: 9px;
   color: #888;
+}
+
+.preset-btn {
+  border: none;
+  border-radius: 4px;
+  padding: 2px 6px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #ccc;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease;
+  -webkit-app-region: no-drag;
+}
+
+.preset-btn:hover {
+  background: #4c8dff;
+  color: #fff;
+}
+
+.preset-btn:active {
+  transform: scale(0.95);
 }
 
 .freq-display {
@@ -155,8 +177,12 @@ body {
 /* Rendre la fréquence cliquable */
 #freq {
   cursor: pointer;
-  transition: opacity 0.4s ease, transform 0.15s ease;
+  transition: opacity 0.4s ease, transform 0.15s ease, color 0.3s ease;
   -webkit-app-region: no-drag;
+}
+
+#freq.out-of-range {
+  color: #ff5050;
 }
 
 #freq:hover {

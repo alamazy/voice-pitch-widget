@@ -48,6 +48,34 @@
           />
           <span id="peak-value" class="setting-value">20%</span>
         </label>
+
+        <label class="setting-row">
+          <span>Min&nbsp;(Hz)</span>
+          <input
+            type="range"
+            id="min-freq-slider"
+            min="50"
+            max="450"
+            step="5"
+            value="50"
+          />
+          <span id="min-freq-value" class="setting-value">50</span>
+          <button id="preset-male-btn" class="preset-btn" title="Homme (75-150 Hz)">♂</button>
+          <button id="preset-female-btn" class="preset-btn" title="Femme (175-275 Hz)">♀</button>
+        </label>
+
+        <label class="setting-row">
+          <span>Max&nbsp;(Hz)</span>
+          <input
+            type="range"
+            id="max-freq-slider"
+            min="50"
+            max="450"
+            step="10"
+            value="450"
+          />
+          <span id="max-freq-value" class="setting-value">450</span>
+        </label>
       </section>
 
       <section id="graph-view" class="hidden">

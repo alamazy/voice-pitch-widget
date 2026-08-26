@@ -17,8 +17,8 @@ class PitchProcessor extends AudioWorkletProcessor {
     //   signal (et pas juste du bruit de fond / silence).
     // peakThreshold : ratio (0-1) du pic du buffer utilisé pour "trimmer"
     //   les bords silencieux avant l'autocorrélation.
-    this.rmsThreshold = 0.01;
-    this.peakThreshold = 0.2;
+    this.rmsThreshold = 0.05;
+    this.peakThreshold = 0.25;
 
     // On ne recalcule pas à chaque bloc de 128 échantillons (coûteux
     // et inutile) : on lance l'analyse toutes les N frames.
@@ -123,7 +123,7 @@ class PitchProcessor extends AudioWorkletProcessor {
     const fftSize = 8192; // Taille FFT très grande pour excellente résolution
     const freqPerBin = sampleRate / fftSize; // ~5.86 Hz par bin
     
-    // Calculer uniquement les bins dans la plage vocale (50-450 Hz)
+    // Calculer uniquement les bins dans la plage vocale fixe (50-450 Hz)
     const minFreq = 50;
     const maxFreq = 450;
     const minBin = Math.floor(minFreq / freqPerBin);

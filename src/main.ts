@@ -15,6 +15,12 @@ const rmsSlider = document.getElementById("rms-slider") as HTMLInputElement;
 const rmsValueEl = document.getElementById("rms-value") as HTMLSpanElement;
 const peakSlider = document.getElementById("peak-slider") as HTMLInputElement;
 const peakValueEl = document.getElementById("peak-value") as HTMLSpanElement;
+const minFreqSlider = document.getElementById("min-freq-slider") as HTMLInputElement;
+const minFreqValueEl = document.getElementById("min-freq-value") as HTMLSpanElement;
+const maxFreqSlider = document.getElementById("max-freq-slider") as HTMLInputElement;
+const maxFreqValueEl = document.getElementById("max-freq-value") as HTMLSpanElement;
+const presetMaleBtn = document.getElementById("preset-male-btn") as HTMLButtonElement;
+const presetFemaleBtn = document.getElementById("preset-female-btn") as HTMLButtonElement;
 
 const SETTINGS_STORAGE_KEY = "voice-pitch-widget:thresholds";
 
@@ -39,6 +45,10 @@ function preventDragOnInteractiveElements() {
     "#toggle-btn",
     "#rms-slider",
     "#peak-slider",
+    "#min-freq-slider",
+    "#max-freq-slider",
+    "#preset-male-btn",
+    "#preset-female-btn",
     "#clear-history-btn",
     "#pitch-canvas",
     "#freq",
@@ -55,11 +65,15 @@ preventDragOnInteractiveElements();
 interface Thresholds {
   rmsThreshold: number;
   peakThreshold: number;
+  minFreq: number;
+  maxFreq: number;
 }
 
 const DEFAULT_THRESHOLDS: Thresholds = {
-  rmsThreshold: 0.001,
+  rmsThreshold: 0.05,
   peakThreshold: 0.2,
+  minFreq: 50,
+  maxFreq: 450,
 };
 
 /** Charge les seuils sauvegardés localement, ou renvoie les valeurs par défaut. */
@@ -71,6 +85,8 @@ function loadThresholds(): Thresholds {
     return {
       rmsThreshold: typeof parsed.rmsThreshold === "number" ? parsed.rmsThreshold : DEFAULT_THRESHOLDS.rmsThreshold,
       peakThreshold: typeof parsed.peakThreshold === "number" ? parsed.peakThreshold : DEFAULT_THRESHOLDS.peakThreshold,
+      minFreq: typeof parsed.minFreq === "number" ? parsed.minFreq : DEFAULT_THRESHOLDS.minFreq,
+      maxFreq: typeof parsed.maxFreq === "number" ? parsed.maxFreq : DEFAULT_THRESHOLDS.maxFreq,
     };
   } catch {
     return { ...DEFAULT_THRESHOLDS };
@@ -84,8 +100,12 @@ function saveThresholds(thresholds: Thresholds) {
 let currentThresholds = loadThresholds();
 rmsSlider.value = String(currentThresholds.rmsThreshold);
 peakSlider.value = String(currentThresholds.peakThreshold);
+minFreqSlider.value = String(currentThresholds.minFreq);
+maxFreqSlider.value = String(currentThresholds.maxFreq);
 rmsValueEl.textContent = currentThresholds.rmsThreshold.toFixed(4);
 peakValueEl.textContent = `${Math.round(currentThresholds.peakThreshold * 100)}%`;
+minFreqValueEl.textContent = String(currentThresholds.minFreq);
+maxFreqValueEl.textContent = String(currentThresholds.maxFreq);
 
 const NOTE_NAMES = [
   "Do",
@@ -161,7 +181,20 @@ async function startListening() {
       
       if (frequency > 0) {
         const smoothed = smoother.push(frequency);
-        freqEl.textContent = `${smoothed.toFixed(1)} Hz`;
+        
+        // Vérifier si la fréquence est dans la gamme cible définie
+        let freqText = `${smoothed.toFixed(1)} Hz`;
+        if (smoothed < currentThresholds.minFreq) {
+          freqText = `↓ ${freqText}`;
+          freqEl.classList.add("out-of-range");
+        } else if (smoothed > currentThresholds.maxFreq) {
+          freqText = `↑ ${freqText}`;
+          freqEl.classList.add("out-of-range");
+        } else {
+          freqEl.classList.remove("out-of-range");
+        }
+        
+        freqEl.textContent = freqText;
         noteEl.textContent = frequencyToNote(smoothed);
         // Signal actif : on retire l'indice visuel "figé" s'il était présent.
         noteEl.classList.remove("held");
@@ -256,7 +289,7 @@ function drawPitchGraph() {
     return;
   }
 
-  // Limites de fréquence fixes
+  // Limites de fréquence fixes pour l'affichage du spectrogramme (toujours 50-450)
   const minFreq = 50;
   const maxFreq = 450;
 
@@ -465,7 +498,7 @@ async function showView(view: View) {
       case View.Settings:
         settingsView.classList.remove("hidden");
         settingsBtn.classList.add("active");
-        await window.setSize(new LogicalSize(240, 180));
+        await window.setSize(new LogicalSize(270, 180));
         break;
         
       case View.Graph:
@@ -542,6 +575,55 @@ peakSlider.addEventListener("input", () => {
     type: "update-thresholds",
     peakThreshold: value,
   });
+});
+
+minFreqSlider.addEventListener("input", () => {
+  let value = parseFloat(minFreqSlider.value);
+  // Empêcher min de dépasser max
+  if (value > currentThresholds.maxFreq) {
+    value = currentThresholds.maxFreq;
+    minFreqSlider.value = String(value);
+  }
+  currentThresholds = { ...currentThresholds, minFreq: value };
+  minFreqValueEl.textContent = String(value);
+  saveThresholds(currentThresholds);
+  // Utilisé uniquement pour l'affichage rouge, pas envoyé au worklet
+});
+
+maxFreqSlider.addEventListener("input", () => {
+  let value = parseFloat(maxFreqSlider.value);
+  // Empêcher max de descendre en dessous de min
+  if (value < currentThresholds.minFreq) {
+    value = currentThresholds.minFreq;
+    maxFreqSlider.value = String(value);
+  }
+  currentThresholds = { ...currentThresholds, maxFreq: value };
+  maxFreqValueEl.textContent = String(value);
+  saveThresholds(currentThresholds);
+  // Utilisé uniquement pour l'affichage rouge, pas envoyé au worklet
+});
+
+// Presets homme/femme
+presetMaleBtn.addEventListener("click", () => {
+  const minFreq = 75;
+  const maxFreq = 150;
+  currentThresholds = { ...currentThresholds, minFreq, maxFreq };
+  minFreqSlider.value = String(minFreq);
+  maxFreqSlider.value = String(maxFreq);
+  minFreqValueEl.textContent = String(minFreq);
+  maxFreqValueEl.textContent = String(maxFreq);
+  saveThresholds(currentThresholds);
+});
+
+presetFemaleBtn.addEventListener("click", () => {
+  const minFreq = 175;
+  const maxFreq = 275;
+  currentThresholds = { ...currentThresholds, minFreq, maxFreq };
+  minFreqSlider.value = String(minFreq);
+  maxFreqSlider.value = String(maxFreq);
+  minFreqValueEl.textContent = String(minFreq);
+  maxFreqValueEl.textContent = String(maxFreq);
+  saveThresholds(currentThresholds);
 });
 
 // Clic sur la fréquence pour afficher le graphique
