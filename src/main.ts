@@ -559,3 +559,6 @@ clearHistoryBtn.addEventListener("click", () => {
   pitchHistory.length = 0;
   drawPitchGraph();
 });
+
+// Démarrer automatiquement l'analyse audio à l'ouverture de l'application
+void startListening();
