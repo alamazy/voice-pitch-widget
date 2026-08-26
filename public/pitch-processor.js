@@ -12,6 +12,8 @@ class PitchProcessor extends AudioWorkletProcessor {
     this.bufferSize = 2048;
     this.buffer = new Float32Array(this.bufferSize);
     this.writeIndex = 0;
+    this.rmsThreshold = 0.001;
+    this.peakThreshold = 0.2;
 
     // On ne recalcule pas à chaque bloc de 128 échantillons (coûteux
     // et inutile) : on lance l'analyse toutes les N frames.
@@ -26,14 +28,19 @@ class PitchProcessor extends AudioWorkletProcessor {
 
     // RMS : on ignore le silence / bruit de fond trop faible.
     let rms = 0;
-    for (let i = 0; i < size; i++) rms += buffer[i] * buffer[i];
+    let peak = 0;
+    for (let i = 0; i < size; i++)  {
+      const abs = Math.abs(buffer[i]);
+      rms += buffer[i] * buffer[i];
+      if (abs > peak) peak = abs;
+    }
     rms = Math.sqrt(rms / size);
-    if (rms < 0.01) return -1;
+    if (rms < this.rmsThreshold) return -1;
 
     // Recherche des bornes utiles du signal (trim silence de bord).
     let start = 0;
     let end = size - 1;
-    const threshold = 0.2;
+    const threshold = Math.max(peak * this.peakThreshold, 0.001);
     while (start < size / 2 && Math.abs(buffer[start]) < threshold) start++;
     while (end > size / 2 && Math.abs(buffer[end]) < threshold) end--;
 
