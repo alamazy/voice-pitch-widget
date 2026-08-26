@@ -10,11 +10,15 @@ body {
   overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   user-select: none;
+  width: 100%;
+  height: 100%;
 }
 
 .widget {
-  width: 220px;
-  height: 140px;
+  width: 100%;
+  height: 100%;
+  min-width: 220px;
+  min-height: 140px;
   background: rgba(20, 20, 24, 0.85);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
@@ -148,6 +152,22 @@ body {
   opacity: 0.45;
 }
 
+/* Rendre la fréquence cliquable */
+#freq {
+  cursor: pointer;
+  transition: opacity 0.4s ease, transform 0.15s ease;
+  -webkit-app-region: no-drag;
+}
+
+#freq:hover {
+  transform: scale(1.05);
+  opacity: 0.9;
+}
+
+#freq:active {
+  transform: scale(0.98);
+}
+
 #toggle-btn {
   -webkit-app-region: no-drag;
   border: none;
@@ -166,4 +186,42 @@ body {
 .status {
   font-size: 11px;
   color: #888;
+}
+
+/* Vue du graphique */
+#graph-view {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  gap: 6px;
+  padding-top: 20px;
+  -webkit-app-region: no-drag;
+}
+
+#graph-view.hidden {
+  display: none;
+}
+
+#pitch-canvas {
+  flex: 1;
+  width: 100%;
+  border-radius: 8px;
+  background: rgba(20, 20, 24, 0.5);
+  cursor: pointer;
+}
+
+#clear-history-btn {
+  -webkit-app-region: no-drag;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 10px;
+  background: rgba(255, 80, 80, 0.3);
+  color: white;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+#clear-history-btn:hover {
+  background: rgba(255, 80, 80, 0.5);
 }

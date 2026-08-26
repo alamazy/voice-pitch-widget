@@ -1,4 +1,4 @@
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 
 const noteEl = document.getElementById("note") as HTMLSpanElement;
 const freqEl = document.getElementById("freq") as HTMLSpanElement;
@@ -8,12 +8,23 @@ const closeBtn = document.getElementById("close-btn") as HTMLButtonElement;
 const settingsBtn = document.getElementById("settings-btn") as HTMLButtonElement;
 const mainView = document.getElementById("main-view") as HTMLElement;
 const settingsView = document.getElementById("settings-view") as HTMLElement;
+const graphView = document.getElementById("graph-view") as HTMLElement;
+const clearHistoryBtn = document.getElementById("clear-history-btn") as HTMLButtonElement;
+const pitchCanvas = document.getElementById("pitch-canvas") as HTMLCanvasElement;
 const rmsSlider = document.getElementById("rms-slider") as HTMLInputElement;
 const rmsValueEl = document.getElementById("rms-value") as HTMLSpanElement;
 const peakSlider = document.getElementById("peak-slider") as HTMLInputElement;
 const peakValueEl = document.getElementById("peak-value") as HTMLSpanElement;
 
 const SETTINGS_STORAGE_KEY = "voice-pitch-widget:thresholds";
+
+// Historique des fréquences pour le graphique spectral
+interface PitchDataPoint {
+  timestamp: number;
+  frequency: number;
+}
+const pitchHistory: PitchDataPoint[] = [];
+const MAX_HISTORY_DURATION = 30000; // 30 secondes d'historique
 
 // data-tauri-drag-region sur <main> intercepte le mousedown de TOUS ses
 // enfants pour initier le déplacement de la fenêtre — y compris sur des
@@ -27,6 +38,9 @@ function preventDragOnInteractiveElements() {
     "#toggle-btn",
     "#rms-slider",
     "#peak-slider",
+    "#clear-history-btn",
+    "#pitch-canvas",
+    "#freq",
   ];
   for (const selector of interactiveSelectors) {
     const el = document.querySelector(selector);
@@ -149,6 +163,14 @@ async function startListening() {
         // Signal actif : on retire l'indice visuel "figé" s'il était présent.
         noteEl.classList.remove("held");
         freqEl.classList.remove("held");
+        
+        // Ajouter à l'historique
+        const now = Date.now();
+        pitchHistory.push({ timestamp: now, frequency: smoothed });
+        // Nettoyer l'historique ancien
+        while (pitchHistory.length > 0 && pitchHistory[0].timestamp < now - MAX_HISTORY_DURATION) {
+          pitchHistory.shift();
+        }
       } else {
         // Pas de voix détectée : on NE touche PAS au texte affiché, la
         // dernière note/fréquence reste visible. On réinitialise juste le
@@ -200,6 +222,171 @@ function stopListening() {
   noteEl.textContent = "--";
 }
 
+function drawPitchGraph() {
+  const ctx = pitchCanvas.getContext("2d");
+  if (!ctx) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  const rect = pitchCanvas.getBoundingClientRect();
+  pitchCanvas.width = rect.width * dpr;
+  pitchCanvas.height = rect.height * dpr;
+  ctx.scale(dpr, dpr);
+
+  const width = rect.width;
+  const height = rect.height;
+
+  // Fond
+  ctx.fillStyle = "rgba(20, 20, 24, 0.95)";
+  ctx.fillRect(0, 0, width, height);
+
+  if (pitchHistory.length < 2) {
+    ctx.fillStyle = "#888";
+    ctx.font = "12px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("Pas encore de données...", width / 2, height / 2);
+    return;
+  }
+
+  // Déterminer les limites de fréquence (avec une marge)
+  const frequencies = pitchHistory.map((d) => d.frequency);
+  const minFreq = Math.max(50, Math.min(...frequencies) - 20);
+  const maxFreq = Math.min(1000, Math.max(...frequencies) + 20);
+
+  // Axes et grille
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.1)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let i = 0; i <= 5; i++) {
+    const y = (i / 5) * height;
+    ctx.moveTo(0, y);
+    ctx.lineTo(width, y);
+  }
+  ctx.stroke();
+
+  // Étiquettes de fréquence
+  ctx.fillStyle = "#666";
+  ctx.font = "9px sans-serif";
+  ctx.textAlign = "right";
+  for (let i = 0; i <= 5; i++) {
+    const freq = maxFreq - (i / 5) * (maxFreq - minFreq);
+    const y = (i / 5) * height;
+    ctx.fillText(`${Math.round(freq)} Hz`, width - 4, y + 3);
+  }
+
+  // Dessiner la courbe de pitch
+  const now = Date.now();
+  const timeRange = MAX_HISTORY_DURATION; // Fenêtre fixe de 30 secondes
+  const maxGap = 500; // Briser la ligne si gap > 500ms entre deux points
+
+  ctx.strokeStyle = "#4c8dff";
+  ctx.lineWidth = 2;
+
+  for (let i = 0; i < pitchHistory.length; i++) {
+    const point = pitchHistory[i];
+    const x = ((point.timestamp - (now - timeRange)) / timeRange) * width;
+    const y = height - ((point.frequency - minFreq) / (maxFreq - minFreq)) * height;
+
+    if (i === 0) {
+      // Premier point : commencer un nouveau segment
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+    } else {
+      const prevPoint = pitchHistory[i - 1];
+      const timeDiff = point.timestamp - prevPoint.timestamp;
+      
+      if (timeDiff > maxGap) {
+        // Gap détecté : terminer le segment précédent et en commencer un nouveau
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+      } else {
+        // Continuer la ligne
+        ctx.lineTo(x, y);
+      }
+    }
+  }
+  ctx.stroke();
+
+  // Points
+  ctx.fillStyle = "#4c8dff";
+  for (const point of pitchHistory) {
+    const x = ((point.timestamp - (now - timeRange)) / timeRange) * width;
+    const y = height - ((point.frequency - minFreq) / (maxFreq - minFreq)) * height;
+    ctx.beginPath();
+    ctx.arc(x, y, 2, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+}
+
+let graphAnimationId: number | null = null;
+
+// Enum pour les différentes vues
+enum View {
+  Main = "main",
+  Settings = "settings",
+  Graph = "graph",
+}
+
+let currentView: View = View.Main;
+
+async function showView(view: View) {
+  // Arrêter l'animation du graphique si elle tourne
+  if (graphAnimationId !== null) {
+    cancelAnimationFrame(graphAnimationId);
+    graphAnimationId = null;
+  }
+
+  // Masquer toutes les vues
+  mainView.classList.add("hidden");
+  settingsView.classList.add("hidden");
+  graphView.classList.add("hidden");
+
+  // Afficher la vue demandée et redimensionner
+  const window = getCurrentWindow();
+  
+  try {
+    switch (view) {
+      case View.Main:
+        mainView.classList.remove("hidden");
+        settingsBtn.classList.remove("active");
+        await window.setSize(new LogicalSize(240, 160));
+        break;
+        
+      case View.Settings:
+        settingsView.classList.remove("hidden");
+        settingsBtn.classList.add("active");
+        await window.setSize(new LogicalSize(240, 180));
+        break;
+        
+      case View.Graph:
+        graphView.classList.remove("hidden");
+        settingsBtn.classList.remove("active");
+        await window.setSize(new LogicalSize(240, 320));
+        // Attendre un peu pour que le DOM se mette à jour
+        await new Promise(resolve => setTimeout(resolve, 100));
+        // Démarrer l'animation du graphique
+        const animate = () => {
+          drawPitchGraph();
+          graphAnimationId = requestAnimationFrame(animate);
+        };
+        animate();
+        break;
+    }
+    
+    currentView = view;
+  } catch (err) {
+    console.error("Erreur de changement de vue :", err);
+  }
+}
+
+async function showGraphView() {
+  await showView(View.Graph);
+}
+
+async function hideGraphView() {
+  await showView(View.Main);
+}
+
 toggleBtn.addEventListener("click", () => {
   if (isRunning) {
     stopListening();
@@ -214,15 +401,12 @@ closeBtn.addEventListener("click", () => {
 });
 
 settingsBtn.addEventListener("click", () => {
-  const isOpen = !settingsView.classList.contains("hidden");
-  if (isOpen) {
-    settingsView.classList.add("hidden");
-    mainView.classList.remove("hidden");
-    settingsBtn.classList.remove("active");
+  if (currentView === View.Settings) {
+    // Si on est déjà dans les réglages, retourner à la vue principale
+    void showView(View.Main);
   } else {
-    mainView.classList.add("hidden");
-    settingsView.classList.remove("hidden");
-    settingsBtn.classList.add("active");
+    // Sinon, afficher les réglages
+    void showView(View.Settings);
   }
 });
 
@@ -248,4 +432,20 @@ peakSlider.addEventListener("input", () => {
     type: "update-thresholds",
     peakThreshold: value,
   });
+});
+
+// Clic sur la fréquence pour afficher le graphique
+freqEl.addEventListener("click", () => {
+  void showGraphView();
+});
+
+// Clic sur le canvas pour retourner à la vue principale
+pitchCanvas.addEventListener("click", () => {
+  void hideGraphView();
+});
+
+// Bouton pour effacer l'historique
+clearHistoryBtn.addEventListener("click", () => {
+  pitchHistory.length = 0;
+  drawPitchGraph();
 });

@@ -14,12 +14,12 @@
       {
         "label": "main",
         "title": "Pitch",
-        "width": 220,
-        "height": 140,
+        "width": 240,
+        "height": 160,
         "alwaysOnTop": true,
         "decorations": false,
         "transparent": true,
-        "resizable": false,
+        "resizable": true,
         "skipTaskbar": true,
         "shadow": false,
         "center": true
