@@ -50,6 +50,76 @@ body {
   color: #fff;
 }
 
+#settings-btn {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 22px;
+  height: 20px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: #ccc;
+  font-size: 12px;
+  text-align: center;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+#settings-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+#settings-btn.active {
+  background: #4c8dff;
+  color: #fff;
+}
+
+#main-view {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+}
+
+#settings-view {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 4px;
+  -webkit-app-region: no-drag;
+}
+
+#settings-view.hidden,
+#main-view.hidden {
+  display: none;
+}
+
+.setting-row {
+  display: flex;
+  flex-direction: row;
+  gap: 2px;
+  font-size: 10px;
+  color: #ccc;
+}
+
+.setting-row input[type="range"] {
+  width: 100%;
+  height: 14px;
+  accent-color: #4c8dff;
+}
+
+.setting-value {
+  align-self: baseline;
+  font-size: 9px;
+  color: #888;
+}
+
 .freq-display {
   display: flex;
   flex-direction: column;

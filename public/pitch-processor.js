@@ -12,13 +12,34 @@ class PitchProcessor extends AudioWorkletProcessor {
     this.bufferSize = 2048;
     this.buffer = new Float32Array(this.bufferSize);
     this.writeIndex = 0;
-    this.rmsThreshold = 0.001;
+
+    // Seuils configurables en live depuis l'UI (voir onmessage plus bas).
+    // rmsThreshold : niveau sonore minimum pour considérer qu'il y a un
+    //   signal (et pas juste du bruit de fond / silence).
+    // peakThreshold : ratio (0-1) du pic du buffer utilisé pour "trimmer"
+    //   les bords silencieux avant l'autocorrélation.
+    this.rmsThreshold = 0.01;
     this.peakThreshold = 0.2;
 
     // On ne recalcule pas à chaque bloc de 128 échantillons (coûteux
     // et inutile) : on lance l'analyse toutes les N frames.
     this.framesSinceAnalysis = 0;
     this.analysisIntervalFrames = 4; // ~toutes les 4*128 = 512 échantillons
+
+    // Permet à l'UI (main.ts) d'ajuster les seuils en live, sans recharger
+    // le worklet. Message attendu :
+    // { type: "update-thresholds", rmsThreshold, peakThreshold }
+    this.port.onmessage = (event) => {
+      const data = event.data;
+      if (data && data.type === "update-thresholds") {
+        if (typeof data.rmsThreshold === "number") {
+          this.rmsThreshold = data.rmsThreshold;
+        }
+        if (typeof data.peakThreshold === "number") {
+          this.peakThreshold = data.peakThreshold;
+        }
+      }
+    };
   }
 
   // Autocorrélation normalisée + recherche du premier pic significatif.
@@ -29,7 +50,7 @@ class PitchProcessor extends AudioWorkletProcessor {
     // RMS : on ignore le silence / bruit de fond trop faible.
     let rms = 0;
     let peak = 0;
-    for (let i = 0; i < size; i++)  {
+    for (let i = 0; i < size; i++) {
       const abs = Math.abs(buffer[i]);
       rms += buffer[i] * buffer[i];
       if (abs > peak) peak = abs;
@@ -38,6 +59,9 @@ class PitchProcessor extends AudioWorkletProcessor {
     if (rms < this.rmsThreshold) return -1;
 
     // Recherche des bornes utiles du signal (trim silence de bord).
+    // Le seuil est RELATIF au pic du buffer plutôt qu'une valeur absolue :
+    // un seuil fixe supposerait un signal proche du maximum théorique
+    // (1.0), ce qui exigerait de crier pour le dépasser.
     let start = 0;
     let end = size - 1;
     const threshold = Math.max(peak * this.peakThreshold, 0.001);
