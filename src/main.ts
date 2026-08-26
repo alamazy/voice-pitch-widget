@@ -22,6 +22,7 @@ const SETTINGS_STORAGE_KEY = "voice-pitch-widget:thresholds";
 interface PitchDataPoint {
   timestamp: number;
   frequency: number;
+  spectrum?: number[]; // Données spectrales pour le spectrogramme
 }
 const pitchHistory: PitchDataPoint[] = [];
 const MAX_HISTORY_DURATION = 30000; // 30 secondes d'historique
@@ -154,8 +155,10 @@ async function startListening() {
     const source = audioContext.createMediaStreamSource(mediaStream);
     workletNode = new AudioWorkletNode(audioContext, "pitch-processor");
 
-    workletNode.port.onmessage = (event: MessageEvent<{ frequency: number }>) => {
-      const { frequency } = event.data;
+    workletNode.port.onmessage = (event: MessageEvent<{ frequency: number; spectrum?: number[] }>) => {
+      const { frequency, spectrum } = event.data;
+      const now = Date.now();
+      
       if (frequency > 0) {
         const smoothed = smoother.push(frequency);
         freqEl.textContent = `${smoothed.toFixed(1)} Hz`;
@@ -164,22 +167,28 @@ async function startListening() {
         noteEl.classList.remove("held");
         freqEl.classList.remove("held");
         
-        // Ajouter à l'historique
-        const now = Date.now();
-        pitchHistory.push({ timestamp: now, frequency: smoothed });
-        // Nettoyer l'historique ancien
-        while (pitchHistory.length > 0 && pitchHistory[0].timestamp < now - MAX_HISTORY_DURATION) {
-          pitchHistory.shift();
+        // Ajouter à l'historique avec la fréquence lissée
+        if (spectrum) {
+          pitchHistory.push({ timestamp: now, frequency: smoothed, spectrum });
         }
       } else {
-        // Pas de voix détectée : on NE touche PAS au texte affiché, la
-        // dernière note/fréquence reste visible. On réinitialise juste le
-        // lissage pour ne pas biaiser la prochaine détection avec des
-        // valeurs devenues obsolètes, et on ajoute un indice visuel discret
+        // Pas de voix détectée : enregistrer quand même le spectre avec frequency = -1
+        if (spectrum) {
+          pitchHistory.push({ timestamp: now, frequency: -1, spectrum });
+        }
+        
+        // On NE touche PAS au texte affiché, la dernière note/fréquence reste visible.
+        // On réinitialise juste le lissage pour ne pas biaiser la prochaine détection
+        // avec des valeurs devenues obsolètes, et on ajoute un indice visuel discret
         // (opacité réduite) pour signaler que la valeur est "en pause".
         smoother.reset();
         noteEl.classList.add("held");
         freqEl.classList.add("held");
+      }
+      
+      // Nettoyer l'historique ancien
+      while (pitchHistory.length > 0 && pitchHistory[0].timestamp < now - MAX_HISTORY_DURATION) {
+        pitchHistory.shift();
       }
     };
 
@@ -247,10 +256,81 @@ function drawPitchGraph() {
     return;
   }
 
-  // Déterminer les limites de fréquence (avec une marge)
-  const frequencies = pitchHistory.map((d) => d.frequency);
-  const minFreq = Math.max(50, Math.min(...frequencies) - 20);
-  const maxFreq = Math.min(1000, Math.max(...frequencies) + 20);
+  // Limites de fréquence fixes
+  const minFreq = 50;
+  const maxFreq = 450;
+
+  const now = Date.now();
+  const timeRange = MAX_HISTORY_DURATION; // Fenêtre fixe de 30 secondes
+
+  // Dessiner le spectrogramme en arrière-plan
+  const fftSize = 8192; // Doit correspondre à la taille FFT du worklet
+  const sampleRate = 48000; // Estimation du sample rate
+  const freqPerBin = sampleRate / fftSize; // ~5.86 Hz par bin
+  
+  // Le spectre retourné commence à 50 Hz
+  const spectrumMinFreq = 50;
+  
+  for (const point of pitchHistory) {
+    if (!point.spectrum || point.spectrum.length === 0) continue;
+    
+    const x = ((point.timestamp - (now - timeRange)) / timeRange) * width;
+    
+    // Chaque bin du spectre correspond à une fréquence précise
+    for (let i = 0; i < point.spectrum.length; i++) {
+      const freq = spectrumMinFreq + i * freqPerBin;
+      
+      // Ne dessiner que dans la plage visible (normalement tout devrait l'être)
+      if (freq < minFreq || freq > maxFreq) continue;
+      
+      const intensity = point.spectrum[i];
+      
+      // Sauter les intensités très faibles pour ne pas surcharger
+      if (intensity < 0.01) continue;
+      
+      // Calculer la position Y et la hauteur pour ce bin
+      const freqStart = freq;
+      const freqEnd = freq + freqPerBin;
+      const yStart = height - ((freqEnd - minFreq) / (maxFreq - minFreq)) * height;
+      const yEnd = height - ((freqStart - minFreq) / (maxFreq - minFreq)) * height;
+      const binHeight = Math.max(0.5, yEnd - yStart);
+      
+      // Palette de couleurs : bleu -> cyan -> vert -> jaune -> rouge
+      let r, g, b;
+      if (intensity < 0.25) {
+        // Bleu à cyan
+        const t = intensity / 0.25;
+        r = 0;
+        g = Math.floor(t * 128);
+        b = Math.floor(128 + t * 127);
+      } else if (intensity < 0.5) {
+        // Cyan à vert
+        const t = (intensity - 0.25) / 0.25;
+        r = 0;
+        g = Math.floor(128 + t * 127);
+        b = Math.floor(255 - t * 255);
+      } else if (intensity < 0.75) {
+        // Vert à jaune
+        const t = (intensity - 0.5) / 0.25;
+        r = Math.floor(t * 255);
+        g = 255;
+        b = 0;
+      } else {
+        // Jaune à rouge
+        const t = (intensity - 0.75) / 0.25;
+        r = 255;
+        g = Math.floor(255 - t * 255);
+        b = 0;
+      }
+      
+      // Opacité basée sur l'intensité pour un meilleur rendu
+      const alpha = Math.min(0.9, 0.2 + intensity * 0.7);
+      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+      
+      // Dessiner une bande verticale pour ce bin (très fine avec haute résolution)
+      ctx.fillRect(x - 0.75, yStart, 1.5, binHeight);
+    }
+  }
 
   // Axes et grille
   ctx.strokeStyle = "rgba(255, 255, 255, 0.1)";
@@ -273,48 +353,78 @@ function drawPitchGraph() {
     ctx.fillText(`${Math.round(freq)} Hz`, width - 4, y + 3);
   }
 
-  // Dessiner la courbe de pitch
-  const now = Date.now();
-  const timeRange = MAX_HISTORY_DURATION; // Fenêtre fixe de 30 secondes
+  // Dessiner la courbe de pitch (uniquement pour les fréquences détectées)
   const maxGap = 500; // Briser la ligne si gap > 500ms entre deux points
+  const validPoints = pitchHistory.filter(p => p.frequency > 0);
 
-  ctx.strokeStyle = "#4c8dff";
-  ctx.lineWidth = 2;
+  if (validPoints.length > 0) {
+    // Contour blanc pour meilleure visibilité sur le spectrogramme
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
+    ctx.lineWidth = 4;
 
-  for (let i = 0; i < pitchHistory.length; i++) {
-    const point = pitchHistory[i];
-    const x = ((point.timestamp - (now - timeRange)) / timeRange) * width;
-    const y = height - ((point.frequency - minFreq) / (maxFreq - minFreq)) * height;
+    let firstPoint = true;
+    for (let i = 0; i < validPoints.length; i++) {
+      const point = validPoints[i];
+      const x = ((point.timestamp - (now - timeRange)) / timeRange) * width;
+      const y = height - ((point.frequency - minFreq) / (maxFreq - minFreq)) * height;
 
-    if (i === 0) {
-      // Premier point : commencer un nouveau segment
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-    } else {
-      const prevPoint = pitchHistory[i - 1];
-      const timeDiff = point.timestamp - prevPoint.timestamp;
-      
-      if (timeDiff > maxGap) {
-        // Gap détecté : terminer le segment précédent et en commencer un nouveau
-        ctx.stroke();
+      if (firstPoint) {
         ctx.beginPath();
         ctx.moveTo(x, y);
+        firstPoint = false;
       } else {
-        // Continuer la ligne
-        ctx.lineTo(x, y);
+        const prevPoint = validPoints[i - 1];
+        const timeDiff = point.timestamp - prevPoint.timestamp;
+        
+        if (timeDiff > maxGap) {
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
       }
     }
-  }
-  ctx.stroke();
+    ctx.stroke();
 
-  // Points
-  ctx.fillStyle = "#4c8dff";
-  for (const point of pitchHistory) {
-    const x = ((point.timestamp - (now - timeRange)) / timeRange) * width;
-    const y = height - ((point.frequency - minFreq) / (maxFreq - minFreq)) * height;
-    ctx.beginPath();
-    ctx.arc(x, y, 2, 0, 2 * Math.PI);
-    ctx.fill();
+    // Courbe principale en bleu
+    ctx.strokeStyle = "#4c8dff";
+    ctx.lineWidth = 2;
+
+    firstPoint = true;
+    for (let i = 0; i < validPoints.length; i++) {
+      const point = validPoints[i];
+      const x = ((point.timestamp - (now - timeRange)) / timeRange) * width;
+      const y = height - ((point.frequency - minFreq) / (maxFreq - minFreq)) * height;
+
+      if (firstPoint) {
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        firstPoint = false;
+      } else {
+        const prevPoint = validPoints[i - 1];
+        const timeDiff = point.timestamp - prevPoint.timestamp;
+        
+        if (timeDiff > maxGap) {
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      }
+    }
+    ctx.stroke();
+
+    // Points
+    ctx.fillStyle = "#4c8dff";
+    for (const point of validPoints) {
+      const x = ((point.timestamp - (now - timeRange)) / timeRange) * width;
+      const y = height - ((point.frequency - minFreq) / (maxFreq - minFreq)) * height;
+      ctx.beginPath();
+      ctx.arc(x, y, 2, 0, 2 * Math.PI);
+      ctx.fill();
+    }
   }
 }
 

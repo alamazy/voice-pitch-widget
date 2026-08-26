@@ -7,9 +7,8 @@ class PitchProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
 
-    // Taille de la fenêtre d'analyse. 2048 échantillons à 44.1/48kHz
-    // couvre largement les fondamentales vocales (~65-1000 Hz).
-    this.bufferSize = 2048;
+    // Taille de la fenêtre d'analyse agrandie pour la FFT haute résolution
+    this.bufferSize = 8192;
     this.buffer = new Float32Array(this.bufferSize);
     this.writeIndex = 0;
 
@@ -24,7 +23,7 @@ class PitchProcessor extends AudioWorkletProcessor {
     // On ne recalcule pas à chaque bloc de 128 échantillons (coûteux
     // et inutile) : on lance l'analyse toutes les N frames.
     this.framesSinceAnalysis = 0;
-    this.analysisIntervalFrames = 4; // ~toutes les 4*128 = 512 échantillons
+    this.analysisIntervalFrames = 8; // ~toutes les 8*128 = 1024 échantillons (plus espacé pour FFT lourde)
 
     // Permet à l'UI (main.ts) d'ajuster les seuils en live, sans recharger
     // le worklet. Message attendu :
@@ -119,6 +118,49 @@ class PitchProcessor extends AudioWorkletProcessor {
     return frequency;
   }
 
+  // Calcule le spectre de magnitudes (optimisé) pour le spectrogramme
+  computeSpectrum(buffer, sampleRate) {
+    const fftSize = 8192; // Taille FFT très grande pour excellente résolution
+    const freqPerBin = sampleRate / fftSize; // ~5.86 Hz par bin
+    
+    // Calculer uniquement les bins dans la plage vocale (50-450 Hz)
+    const minFreq = 50;
+    const maxFreq = 450;
+    const minBin = Math.floor(minFreq / freqPerBin);
+    const maxBin = Math.ceil(maxFreq / freqPerBin);
+    const numBins = maxBin - minBin + 1;
+    
+    // Fenêtre de Hann pour réduire les artefacts
+    const windowed = new Float32Array(fftSize);
+    for (let i = 0; i < fftSize; i++) {
+      const window = 0.5 * (1 - Math.cos(2 * Math.PI * i / fftSize));
+      windowed[i] = buffer[i] * window;
+    }
+    
+    // FFT simplifiée - calcul des magnitudes uniquement pour les bins d'intérêt
+    const spectrum = new Float32Array(numBins);
+    
+    for (let i = 0; i < numBins; i++) {
+      const bin = minBin + i;
+      const freq = bin * freqPerBin;
+      let real = 0;
+      let imag = 0;
+      
+      for (let j = 0; j < fftSize; j++) {
+        const angle = -2 * Math.PI * freq * j / sampleRate;
+        real += windowed[j] * Math.cos(angle);
+        imag += windowed[j] * Math.sin(angle);
+      }
+      
+      // Magnitude normalisée (log scale pour meilleure visualisation)
+      const magnitude = Math.sqrt(real * real + imag * imag) / fftSize;
+      spectrum[i] = Math.max(0, Math.min(1, magnitude * 10)); // Amplification et limitation
+    }
+    
+    return spectrum;
+    return spectrum;
+  }
+
   process(inputs) {
     const input = inputs[0];
     if (!input || input.length === 0) return true;
@@ -142,7 +184,11 @@ class PitchProcessor extends AudioWorkletProcessor {
       }
 
       const frequency = this.autoCorrelate(ordered, sampleRate);
-      this.port.postMessage({ frequency });
+      
+      // Calculer le spectre pour le spectrogramme
+      const spectrum = this.computeSpectrum(ordered, sampleRate);
+      
+      this.port.postMessage({ frequency, spectrum: Array.from(spectrum) });
     }
 
     return true; // garde le processor actif
