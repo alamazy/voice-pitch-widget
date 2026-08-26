@@ -1,16 +1,137 @@
 // AudioWorkletProcessor exécuté dans le thread audio temps réel.
-// Accumule les échantillons dans une fenêtre glissante, puis applique
-// une autocorrélation (méthode "ACF2+") pour estimer F0.
+// Accumule les échantillons dans une fenêtre glissante, applique une
+// autocorrélation pour estimer F0, et une FFT pour le spectrogramme.
 // Volontairement dépendance-free : pas besoin de bundler une lib ici.
+
+// -----------------------------------------------------------------------
+// FFT radix-2 Cooley-Tukey, itérative, in-place.
+// Complexité O(N log N), contre O(N * nombreDeBins) pour une DFT directe
+// bin par bin. Les tables (bit-reversal + twiddle factors) sont
+// précalculées une seule fois à la construction du processor et
+// réutilisées à chaque frame, pour ne rien recalculer dans le chemin
+// temps réel (critique sur le thread audio, qui ne tolère aucun
+// dépassement de budget sous peine de glitchs sonores).
+// -----------------------------------------------------------------------
+
+/** Précalcule la table de bit-reversal et les facteurs de rotation (twiddles). */
+function buildFFTTables(size) {
+  const bits = Math.log2(size);
+  if (!Number.isInteger(bits)) {
+    throw new Error("La taille FFT doit être une puissance de 2");
+  }
+
+  const bitReverse = new Uint32Array(size);
+  for (let i = 0; i < size; i++) {
+    let rev = 0;
+    let x = i;
+    for (let b = 0; b < bits; b++) {
+      rev = (rev << 1) | (x & 1);
+      x >>= 1;
+    }
+    bitReverse[i] = rev;
+  }
+
+  const cosTable = new Float32Array(size / 2);
+  const sinTable = new Float32Array(size / 2);
+  for (let i = 0; i < size / 2; i++) {
+    const angle = (-2 * Math.PI * i) / size;
+    cosTable[i] = Math.cos(angle);
+    sinTable[i] = Math.sin(angle);
+  }
+
+  return { bits, bitReverse, cosTable, sinTable };
+}
+
+/**
+ * FFT radix-2 in-place sur des tableaux real/imag de même taille (doit
+ * être une puissance de 2). Résultat écrit directement dans real/imag.
+ */
+function fftInPlace(real, imag, tables) {
+  const { bits, bitReverse, cosTable, sinTable } = tables;
+  const size = real.length;
+
+  // Réordonnancement bit-reversal (permutation préalable requise par
+  // l'algorithme de Cooley-Tukey en version itérative).
+  for (let i = 0; i < size; i++) {
+    const j = bitReverse[i];
+    if (j > i) {
+      let tmp = real[i];
+      real[i] = real[j];
+      real[j] = tmp;
+      tmp = imag[i];
+      imag[i] = imag[j];
+      imag[j] = tmp;
+    }
+  }
+
+  // Papillons (butterflies), étage par étage : log2(size) étages, chacun
+  // en O(size), soit O(size log size) au total.
+  for (let stage = 1; stage <= bits; stage++) {
+    const stageSize = 1 << stage;
+    const halfStage = stageSize >> 1;
+    const twiddleStep = size / stageSize;
+
+    for (let start = 0; start < size; start += stageSize) {
+      for (let k = 0; k < halfStage; k++) {
+        const twiddleIndex = k * twiddleStep;
+        const cos = cosTable[twiddleIndex];
+        const sin = sinTable[twiddleIndex];
+
+        const evenIndex = start + k;
+        const oddIndex = start + k + halfStage;
+
+        const oddReal = real[oddIndex];
+        const oddImag = imag[oddIndex];
+
+        const tRe = oddReal * cos - oddImag * sin;
+        const tIm = oddReal * sin + oddImag * cos;
+
+        real[oddIndex] = real[evenIndex] - tRe;
+        imag[oddIndex] = imag[evenIndex] - tIm;
+        real[evenIndex] += tRe;
+        imag[evenIndex] += tIm;
+      }
+    }
+  }
+}
 
 class PitchProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
 
-    // Taille de la fenêtre d'analyse agrandie pour la FFT haute résolution
+    // Taille de la fenêtre d'analyse. Doit rester une puissance de 2
+    // (contrainte de la FFT radix-2). 8192 échantillons @48kHz donne une
+    // résolution de sampleRate/8192 ≈ 5.86 Hz par bin, largement de quoi
+    // distinguer des notes vocales adjacentes.
     this.bufferSize = 8192;
     this.buffer = new Float32Array(this.bufferSize);
     this.writeIndex = 0;
+
+    // Buffers réutilisés à chaque frame pour la FFT, alloués une seule
+    // fois (éviter toute allocation dans process()/computeSpectrum(),
+    // qui déclencherait le garbage collector sur le thread audio et
+    // provoquerait des coupures sonores).
+    this.fftReal = new Float32Array(this.bufferSize);
+    this.fftImag = new Float32Array(this.bufferSize);
+    this.fftTables = buildFFTTables(this.bufferSize);
+
+    // Fenêtre de Hann précalculée une seule fois (évite un cos() par
+    // échantillon à chaque frame).
+    this.hannWindow = new Float32Array(this.bufferSize);
+    for (let i = 0; i < this.bufferSize; i++) {
+      this.hannWindow[i] =
+        0.5 * (1 - Math.cos((2 * Math.PI * i) / this.bufferSize));
+    }
+
+    // Plage de fréquences utile pour le spectrogramme (voix humaine).
+    // Bins précalculés une fois : `sampleRate` est une constante globale
+    // du AudioWorkletGlobalScope, disponible dès le constructeur.
+    const freqPerBin = sampleRate / this.bufferSize;
+    this.spectrumMinBin = Math.max(1, Math.floor(50 / freqPerBin));
+    this.spectrumMaxBin = Math.min(
+      this.bufferSize / 2 - 1,
+      Math.ceil(450 / freqPerBin)
+    );
 
     // Seuils configurables en live depuis l'UI (voir onmessage plus bas).
     // rmsThreshold : niveau sonore minimum pour considérer qu'il y a un
@@ -23,7 +144,7 @@ class PitchProcessor extends AudioWorkletProcessor {
     // On ne recalcule pas à chaque bloc de 128 échantillons (coûteux
     // et inutile) : on lance l'analyse toutes les N frames.
     this.framesSinceAnalysis = 0;
-    this.analysisIntervalFrames = 8; // ~toutes les 8*128 = 1024 échantillons (plus espacé pour FFT lourde)
+    this.analysisIntervalFrames = 8; // ~toutes les 8*128 = 1024 échantillons
 
     // Permet à l'UI (main.ts) d'ajuster les seuils en live, sans recharger
     // le worklet. Message attendu :
@@ -118,46 +239,43 @@ class PitchProcessor extends AudioWorkletProcessor {
     return frequency;
   }
 
-  // Calcule le spectre de magnitudes (optimisé) pour le spectrogramme
+  /**
+   * Calcule le spectre de magnitudes via une vraie FFT radix-2, puis
+   * n'extrait que la plage vocale utile (50-450 Hz) pour le spectrogramme.
+   * Remplace l'ancienne DFT directe bin-par-bin : même résultat, mais en
+   * O(N log N) au lieu de O(N * nombreDeBins), donc largement plus rapide
+   * — la marge gagnée permettrait par exemple d'augmenter bufferSize pour
+   * une résolution encore plus fine si besoin, sans re-complexifier ici.
+   */
   computeSpectrum(buffer, sampleRate) {
-    const fftSize = 8192; // Taille FFT très grande pour excellente résolution
-    const freqPerBin = sampleRate / fftSize; // ~5.86 Hz par bin
-    
-    // Calculer uniquement les bins dans la plage vocale fixe (50-450 Hz)
-    const minFreq = 50;
-    const maxFreq = 450;
-    const minBin = Math.floor(minFreq / freqPerBin);
-    const maxBin = Math.ceil(maxFreq / freqPerBin);
-    const numBins = maxBin - minBin + 1;
-    
-    // Fenêtre de Hann pour réduire les artefacts
-    const windowed = new Float32Array(fftSize);
+    const fftSize = this.bufferSize;
+
+    // Fenêtrage de Hann (réduit les artefacts de fuite spectrale) +
+    // remise à zéro de la partie imaginaire, dans les buffers réutilisés.
     for (let i = 0; i < fftSize; i++) {
-      const window = 0.5 * (1 - Math.cos(2 * Math.PI * i / fftSize));
-      windowed[i] = buffer[i] * window;
+      this.fftReal[i] = buffer[i] * this.hannWindow[i];
+      this.fftImag[i] = 0;
     }
-    
-    // FFT simplifiée - calcul des magnitudes uniquement pour les bins d'intérêt
+
+    fftInPlace(this.fftReal, this.fftImag, this.fftTables);
+
+    const minBin = this.spectrumMinBin;
+    const maxBin = this.spectrumMaxBin;
+    const numBins = maxBin - minBin + 1;
+
     const spectrum = new Float32Array(numBins);
-    
     for (let i = 0; i < numBins; i++) {
       const bin = minBin + i;
-      const freq = bin * freqPerBin;
-      let real = 0;
-      let imag = 0;
-      
-      for (let j = 0; j < fftSize; j++) {
-        const angle = -2 * Math.PI * freq * j / sampleRate;
-        real += windowed[j] * Math.cos(angle);
-        imag += windowed[j] * Math.sin(angle);
-      }
-      
-      // Magnitude normalisée (log scale pour meilleure visualisation)
-      const magnitude = Math.sqrt(real * real + imag * imag) / fftSize;
-      spectrum[i] = Math.max(0, Math.min(1, magnitude * 10)); // Amplification et limitation
+      const magnitude =
+        Math.sqrt(
+          this.fftReal[bin] * this.fftReal[bin] +
+            this.fftImag[bin] * this.fftImag[bin]
+        ) / fftSize;
+      // Amplification et limitation (mise à l'échelle empirique pour un
+      // rendu lisible dans le spectrogramme, comme dans la version précédente).
+      spectrum[i] = Math.max(0, Math.min(1, magnitude * 10));
     }
-    
-    return spectrum;
+
     return spectrum;
   }
 
@@ -184,10 +302,8 @@ class PitchProcessor extends AudioWorkletProcessor {
       }
 
       const frequency = this.autoCorrelate(ordered, sampleRate);
-      
-      // Calculer le spectre pour le spectrogramme
       const spectrum = this.computeSpectrum(ordered, sampleRate);
-      
+
       this.port.postMessage({ frequency, spectrum: Array.from(spectrum) });
     }
 
