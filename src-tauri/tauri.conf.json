@@ -15,7 +15,7 @@
         "label": "main",
         "title": "Pitch",
         "width": 240,
-        "height": 160,
+        "height": 140,
         "alwaysOnTop": true,
         "decorations": false,
         "transparent": true,

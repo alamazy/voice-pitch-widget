@@ -239,7 +239,7 @@ async function startListening() {
 
     isRunning = true;
     toggleBtn.textContent = "Arrêter";
-    statusEl.textContent = "Écoute en cours…";
+    statusEl.textContent = "";
   } catch (err) {
     console.error("Impossible d'accéder au micro :", err);
     statusEl.textContent = "Erreur d'accès au micro";
@@ -492,7 +492,7 @@ async function showView(view: View) {
       case View.Main:
         mainView.classList.remove("hidden");
         settingsBtn.classList.remove("active");
-        await window.setSize(new LogicalSize(240, 160));
+        await window.setSize(new LogicalSize(240, 140));
         break;
         
       case View.Settings:
