@@ -58,14 +58,24 @@ body {
 }
 
 #note {
-  font-size: 34px;
-  font-weight: 600;
-  line-height: 1;
+  font-size: 13px;
+  color: #9a9a9a;
+  transition: opacity 0.4s ease;
 }
 
 #freq {
-  font-size: 13px;
-  color: #9a9a9a;
+  font-size: 34px;
+  font-weight: 600;
+  line-height: 1;
+  transition: opacity 0.4s ease;
+}
+
+/* Valeur conservée pendant un silence : légèrement estompée pour
+   signaler qu'il ne s'agit pas d'une mesure "live" à l'instant T,
+   sans pour autant faire disparaître l'info. */
+#note.held,
+#freq.held {
+  opacity: 0.45;
 }
 
 #toggle-btn {

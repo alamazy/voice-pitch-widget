@@ -76,9 +76,18 @@ async function startListening() {
         const smoothed = smoother.push(frequency);
         freqEl.textContent = `${smoothed.toFixed(1)} Hz`;
         noteEl.textContent = frequencyToNote(smoothed);
+        // Signal actif : on retire l'indice visuel "figé" s'il était présent.
+        noteEl.classList.remove("held");
+        freqEl.classList.remove("held");
       } else {
-        freqEl.textContent = "-- Hz";
-        noteEl.textContent = "--";
+        // Pas de voix détectée : on NE touche PAS au texte affiché, la
+        // dernière note/fréquence reste visible. On réinitialise juste le
+        // lissage pour ne pas biaiser la prochaine détection avec des
+        // valeurs devenues obsolètes, et on ajoute un indice visuel discret
+        // (opacité réduite) pour signaler que la valeur est "en pause".
+        smoother.reset();
+        noteEl.classList.add("held");
+        freqEl.classList.add("held");
       }
     };
 
