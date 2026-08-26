@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pitch</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <!-- data-tauri-drag-region permet de déplacer la fenêtre sans barre de titre -->
+    <main data-tauri-drag-region class="widget">
+      <button id="close-btn" title="Fermer">×</button>
+
+      <div class="freq-display">
+        <span id="note">--</span>
+        <span id="freq">-- Hz</span>
+      </div>
+
+      <button id="toggle-btn">Démarrer</button>
+      <div id="status" class="status">Micro inactif</div>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
