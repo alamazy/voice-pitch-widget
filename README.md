@@ -13,10 +13,9 @@ Widget desktop (Tauri) toujours au premier plan, qui détecte en temps réel la 
 
 ### 📊 Visualisation spectrogramme
 - **Graphique temps-fréquence** : Spectrogramme coloré avec courbe de pitch superposée
-- **Haute résolution** : FFT 8192 échantillons (~5.86 Hz par bin de fréquence)
+- **Haute résolution** : FFT rapide 16384 échantillons (~2.93 Hz par bin de fréquence)
 - **Palette de couleurs** : Dégradé bleu → cyan → vert → jaune → rouge selon l'intensité
 - **Historique** : 30 secondes de données en continu
-- **Rendu HiDPI** : Support des écrans haute densité (devicePixelRatio)
 - **Clic interactif** : Cliquer sur la fréquence affiche le graphique, cliquer sur le graphique revient à la vue principale
 
 ### 🎚️ Réglages personnalisables
@@ -45,7 +44,7 @@ Widget desktop (Tauri) toujours au premier plan, qui détecte en temps réel la 
 - **Analyse audio** : 
   - `AudioWorklet` (`public/pitch-processor.js`) dans un thread audio dédié
   - Autocorrélation (ACF2+) pour détection de pitch
-  - FFT manuelle (DFT) pour calcul du spectre dans la gamme vocale
+  - FFT rapide pour calcul du spectre dans la gamme vocale
   - Fenêtrage Hann pour réduire les artefacts spectraux
 - **Visualisation** : Canvas 2D avec animation requestAnimationFrame
 - **Fenêtre** : Tauri v2, configuration `alwaysOnTop`, `transparent`, `resizable`
@@ -77,12 +76,6 @@ Compile le binaire Rust, lance Vite sur `localhost:5173`, et ouvre le widget. L'
 npm run tauri build
 ```
 
-⚠️ Avant un build de production, fournir des icônes valides dans `src-tauri/icons/` (référencées dans `tauri.conf.json`). Générer automatiquement :
-
-```bash
-npx tauri icon chemin/vers/un-logo.png
-```
-
 ## Utilisation
 
 1. **Au démarrage** : Autoriser l'accès au microphone
@@ -95,14 +88,6 @@ npx tauri icon chemin/vers/un-logo.png
 
 ## Points techniques
 
-### Optimisations audio
-- **Buffer circulaire** : 8192 échantillons pour analyse FFT haute résolution
-- **Intervalle d'analyse** : Calcul toutes les 1024 échantillons (8 frames) pour économiser le CPU
-- **Calcul ciblé** : FFT calculée uniquement pour les bins 50-450 Hz (pas tout le spectre)
-- **AGC activé** : Ajustement automatique du gain micro sans biais sur la fréquence
-
-### Points d'attention
-
 #### Windows WebView2
 L'application nécessite WebView2 Runtime. La configuration `fixedRuntime` nécessite le téléchargement préalable de WebView2 fixed version sur le site de Microsoft https://developer.microsoft.com/en-us/microsoft-edge/webview2/#download-section puis la décompresser avec la commande suivante: `Expand .\Microsoft.WebView2.FixedVersionRuntime.128.0.2739.42.x64.cab -F:* ./src-tauri`
 
@@ -111,9 +96,6 @@ L'accès au micro nécessite `NSMicrophoneUsageDescription` dans `Info.plist` (g
 
 #### Précision
 L'autocorrélation donne de bons résultats sur voix propre, peut se tromper d'octave sur signaux bruités
-
-#### Performance
-FFT 8192 = calcul O(n²) DFT, optimisé par calcul ciblé et intervalles espacés
 
 ## Pistes d'évolution
 
