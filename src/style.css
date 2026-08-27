@@ -33,6 +33,25 @@ body {
   -webkit-app-region: drag;
 }
 
+/* Mode navigateur (GitHub Pages, `npm run dev`/`preview` hors Tauri) :
+   il n'y a pas de fenêtre native à redimensionner, donc le widget garde
+   une taille fixe (ajustée en JS via applyWidgetSize) et flotte au
+   centre de la page plutôt que de remplir tout le viewport. */
+body.web-mode {
+  overflow: auto;
+  background: #101014;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+}
+
+body.web-mode .widget {
+  width: 240px;
+  height: 140px;
+  flex: none;
+}
+
 #close-btn {
   position: absolute;
   top: 6px;

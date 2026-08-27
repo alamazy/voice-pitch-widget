@@ -1,5 +1,14 @@
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 
+// Présent uniquement quand l'app tourne dans un webview Tauri (injecté par
+// le runtime natif) : absent dans un simple onglet de navigateur, ce qui
+// permet de désactiver proprement les fonctionnalités liées à la fenêtre
+// (redimensionnement, fermeture...) sur la version GitHub Pages.
+const isTauri = "__TAURI_INTERNALS__" in window;
+if (!isTauri) {
+  document.body.classList.add("web-mode");
+}
+
 const noteEl = document.getElementById("note") as HTMLSpanElement;
 const freqEl = document.getElementById("freq") as HTMLSpanElement;
 const statusEl = document.getElementById("status") as HTMLDivElement;
@@ -270,7 +279,9 @@ async function startListening() {
     console.log("AudioContext created, sample rate:", audioContext.sampleRate);
     
     console.log("Loading AudioWorklet module...");
-    await audioContext.audioWorklet.addModule("/pitch-processor.js");
+    // BASE_URL respecte le sous-chemin de déploiement (ex: GitHub Pages
+    // sert le site sous /nom-repo/) au lieu d'un chemin absolu figé.
+    await audioContext.audioWorklet.addModule(`${import.meta.env.BASE_URL}pitch-processor.js`);
     console.log("AudioWorklet module loaded");
 
     const source = audioContext.createMediaStreamSource(mediaStream);
@@ -613,6 +624,22 @@ function drawPitchGraph() {
 
 let graphAnimationId: number | null = null;
 
+const widgetEl = document.querySelector(".widget") as HTMLElement;
+
+/**
+ * Redimensionne la fenêtre native Tauri, ou (en mode navigateur, où il n'y
+ * a pas de fenêtre à redimensionner) applique directement la taille au
+ * conteneur du widget dans la page.
+ */
+async function applyWidgetSize(width: number, height: number) {
+  if (isTauri) {
+    await getCurrentWindow().setSize(new LogicalSize(width, height));
+  } else {
+    widgetEl.style.width = `${width}px`;
+    widgetEl.style.height = `${height}px`;
+  }
+}
+
 // Enum pour les différentes vues
 enum View {
   Main = "main",
@@ -644,26 +671,24 @@ async function showView(view: View) {
   graphView.classList.add("hidden");
 
   // Afficher la vue demandée et redimensionner
-  const window = getCurrentWindow();
-  
   try {
     switch (view) {
       case View.Main:
         mainView.classList.remove("hidden");
         settingsBtn.classList.remove("active");
-        await window.setSize(new LogicalSize(240, 140));
+        await applyWidgetSize(240, 140);
         break;
         
       case View.Settings:
         settingsView.classList.remove("hidden");
         settingsBtn.classList.add("active");
-        await window.setSize(new LogicalSize(270, 180));
+        await applyWidgetSize(270, 180);
         break;
         
       case View.Graph:
         graphView.classList.remove("hidden");
         settingsBtn.classList.remove("active");
-        await window.setSize(new LogicalSize(240, 320));
+        await applyWidgetSize(240, 320);
         // Attendre un peu pour que le DOM se mette à jour
         await new Promise(resolve => setTimeout(resolve, 100));
         // Démarrer l'animation du graphique
@@ -699,7 +724,11 @@ toggleBtn.addEventListener("click", () => {
 
 closeBtn.addEventListener("click", () => {
   stopListening();
-  void getCurrentWindow().close();
+  // Pas de fenêtre native à fermer côté navigateur : on se contente de
+  // couper le micro (voir stopListening ci-dessus).
+  if (isTauri) {
+    void getCurrentWindow().close();
+  }
 });
 
 settingsBtn.addEventListener("click", () => {

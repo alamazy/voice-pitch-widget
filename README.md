@@ -76,6 +76,14 @@ Compile le binaire Rust, lance Vite sur `localhost:5173`, et ouvre le widget. L'
 npm run tauri build
 ```
 
+## Version navigateur (GitHub Pages)
+
+En plus du build Tauri, le même code fonctionne comme simple page web (sans installation), utile pour tester ou partager rapidement le widget.
+
+- **Détection automatique** : `main.ts` détecte si l'app tourne dans un webview Tauri (présence de `window.__TAURI_INTERNALS__`). En dehors de Tauri, les appels spécifiques (redimensionnement de fenêtre, fermeture) sont désactivés/adaptés, et la page bascule dans un mode `body.web-mode` (widget centré à taille fixe au lieu de remplir toute la fenêtre).
+- **Build web** : `npm run build` génère un `dist/` 100% statique et portable (base d'assets relative), utilisable tel quel dans n'importe quel navigateur ou hébergement statique.
+- **Déploiement automatique** : le workflow [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml) build le projet et le publie sur GitHub Pages à chaque push sur `main`.
+
 ## Utilisation
 
 1. **Au démarrage** : Autoriser l'accès au microphone
