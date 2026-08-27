@@ -15,7 +15,7 @@
       <section id="main-view">
         <div class="freq-display">
           <span id="note">--</span>
-          <span id="freq">-- Hz</span>
+          <span id="freq" title="Cliquer pour voir le graphique">-- Hz</span>
         </div>
 
         <div id="status-display">
@@ -25,6 +25,13 @@
       </section>
 
       <section id="settings-view" class="hidden">
+        <label class="setting-row">
+          <span>Source</span>
+          <select id="source-select">
+            <option value="">Microphone par défaut</option>
+          </select>
+        </label>
+
         <label class="setting-row">
           <span>Sens.&nbsp;(RMS)</span>
           <input

@@ -21,6 +21,7 @@ const maxFreqSlider = document.getElementById("max-freq-slider") as HTMLInputEle
 const maxFreqValueEl = document.getElementById("max-freq-value") as HTMLSpanElement;
 const presetMaleBtn = document.getElementById("preset-male-btn") as HTMLButtonElement;
 const presetFemaleBtn = document.getElementById("preset-female-btn") as HTMLButtonElement;
+const sourceSelect = document.getElementById("source-select") as HTMLSelectElement;
 
 const SETTINGS_STORAGE_KEY = "voice-pitch-widget:thresholds";
 
@@ -71,6 +72,7 @@ function preventDragOnInteractiveElements() {
     "#clear-history-btn",
     "#pitch-canvas",
     "#freq",
+    "#source-select",
   ];
   for (const selector of interactiveSelectors) {
     const el = document.querySelector(selector);
@@ -174,6 +176,69 @@ let workletNode: AudioWorkletNode | null = null;
 let isRunning = false;
 const smoother = new MedianSmoother(5);
 
+const SOURCE_STORAGE_KEY = "voice-pitch-widget:source-device-id";
+
+/** Charge le deviceId sauvegardé, ou "" (périphérique par défaut) si aucun. */
+function loadSelectedDeviceId(): string {
+  try {
+    return localStorage.getItem(SOURCE_STORAGE_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function saveSelectedDeviceId(deviceId: string) {
+  localStorage.setItem(SOURCE_STORAGE_KEY, deviceId);
+}
+
+let selectedDeviceId = loadSelectedDeviceId();
+
+/**
+ * Remplit le <select> avec les micros disponibles. Les labels ne sont
+ * lisibles ("Microphone USB", etc.) qu'une fois la permission micro déjà
+ * accordée au moins une fois — avant ça, le navigateur renvoie des labels
+ * vides par mesure de vie privée. On appelle donc cette fonction à la fois
+ * au chargement (labels probablement vides tant que rien n'a démarré) et
+ * juste après le premier getUserMedia réussi (labels alors disponibles).
+ */
+async function refreshAudioSources() {
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const inputs = devices.filter((d) => d.kind === "audioinput");
+
+    const previousValue = sourceSelect.value;
+    sourceSelect.innerHTML = "";
+
+    const defaultOption = document.createElement("option");
+    defaultOption.value = "";
+    defaultOption.textContent = "Microphone par défaut";
+    sourceSelect.appendChild(defaultOption);
+
+    inputs.forEach((device, index) => {
+      const option = document.createElement("option");
+      option.value = device.deviceId;
+      option.textContent = device.label || `Microphone ${index + 1}`;
+      sourceSelect.appendChild(option);
+    });
+
+    // Restaure la sélection précédente si le périphérique existe toujours,
+    // sinon retombe sur le choix sauvegardé, sinon sur la valeur par défaut.
+    const candidateValue = previousValue || selectedDeviceId;
+    const stillExists = inputs.some((d) => d.deviceId === candidateValue);
+    sourceSelect.value = stillExists ? candidateValue : "";
+  } catch (err) {
+    console.error("Impossible d'énumérer les périphériques audio :", err);
+  }
+}
+
+// Rafraîchit automatiquement la liste si un micro est branché/débranché
+// pendant que l'app tourne (ex: casque USB connecté en cours d'usage).
+navigator.mediaDevices.addEventListener("devicechange", () => {
+  void refreshAudioSources();
+});
+
+void refreshAudioSources();
+
 async function startListening() {
   try {
     console.log("Starting audio analysis...");
@@ -186,9 +251,20 @@ async function startListening() {
         // de pitch. Ça aide beaucoup à détecter une voix à volume normal
         // sans avoir à chanter/parler fort.
         autoGainControl: true,
+        // Si l'utilisateur a choisi un micro spécifique dans les réglages,
+        // on le demande explicitement. Chaîne vide = laisser le navigateur/
+        // OS choisir le périphérique par défaut.
+        ...(selectedDeviceId
+          ? { deviceId: { exact: selectedDeviceId } }
+          : {}),
       },
     });
     console.log("Microphone access granted");
+
+    // Les labels des périphériques ne sont lisibles qu'une fois la
+    // permission accordée : on rafraîchit la liste maintenant pour que le
+    // <select> affiche de vrais noms au lieu de "Microphone 1", "Microphone 2"...
+    void refreshAudioSources();
 
     audioContext = new AudioContext();
     console.log("AudioContext created, sample rate:", audioContext.sampleRate);
@@ -295,6 +371,22 @@ async function startListening() {
     statusEl.textContent = "";
     console.log("Listening started successfully!");
   } catch (err) {
+    // Si le micro précédemment choisi a été débranché/n'existe plus, on
+    // retombe sur le périphérique par défaut plutôt que de bloquer
+    // complètement l'application.
+    if (
+      err instanceof OverconstrainedError ||
+      (err instanceof Error && err.name === "OverconstrainedError")
+    ) {
+      console.warn(
+        "Périphérique audio sélectionné introuvable, retour au micro par défaut."
+      );
+      selectedDeviceId = "";
+      saveSelectedDeviceId("");
+      sourceSelect.value = "";
+      statusEl.textContent = "Micro précédent introuvable, réessaie";
+      return;
+    }
     console.error("Impossible d'accéder au micro :", err);
     statusEl.textContent = "Erreur d'accès au micro";
   }
@@ -691,6 +783,19 @@ presetFemaleBtn.addEventListener("click", () => {
   minFreqValueEl.textContent = String(minFreq);
   maxFreqValueEl.textContent = String(maxFreq);
   saveThresholds(currentThresholds);
+});
+
+sourceSelect.addEventListener("change", () => {
+  selectedDeviceId = sourceSelect.value;
+  saveSelectedDeviceId(selectedDeviceId);
+
+  // Si l'écoute est déjà en cours, redémarre le pipeline audio pour
+  // basculer immédiatement sur le nouveau périphérique, plutôt que
+  // d'attendre le prochain clic sur "Démarrer".
+  if (isRunning) {
+    stopListening();
+    void startListening();
+  }
 });
 
 // Clic sur la fréquence pour afficher le graphique
