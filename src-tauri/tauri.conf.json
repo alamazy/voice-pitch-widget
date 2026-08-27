@@ -22,8 +22,7 @@
         "resizable": true,
         "skipTaskbar": true,
         "shadow": false,
-        "center": true,
-        "devtools": true
+        "center": true
       }
     ],
     "security": {
