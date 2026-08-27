@@ -117,6 +117,5 @@ FFT 8192 = calcul O(n²) DFT, optimisé par calcul ciblé et intervalles espacé
 
 ## Pistes d'évolution
 
-- [ ] Implémenter FFT rapide (O(n log n)) pour meilleures performances
 - [ ] Ajouter algorithme YIN ou MPM pour précision accrue
 - [ ] Raccourci clavier global pour afficher/masquer (plugin `tauri-plugin-global-shortcut`)
