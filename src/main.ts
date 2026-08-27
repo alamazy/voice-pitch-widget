@@ -14,6 +14,7 @@ const freqEl = document.getElementById("freq") as HTMLSpanElement;
 const statusEl = document.getElementById("status") as HTMLDivElement;
 const toggleBtn = document.getElementById("toggle-btn") as HTMLButtonElement;
 const closeBtn = document.getElementById("close-btn") as HTMLButtonElement;
+const compactBtn = document.getElementById("compact-btn") as HTMLButtonElement;
 const settingsBtn = document.getElementById("settings-btn") as HTMLButtonElement;
 const mainView = document.getElementById("main-view") as HTMLElement;
 const settingsView = document.getElementById("settings-view") as HTMLElement;
@@ -70,6 +71,7 @@ const MAX_HISTORY_DURATION = 30000; // 30 secondes d'historique
 function preventDragOnInteractiveElements() {
   const interactiveSelectors = [
     "#close-btn",
+    "#compact-btn",
     "#settings-btn",
     "#toggle-btn",
     "#rms-slider",
@@ -377,7 +379,7 @@ async function startListening() {
       enabled: currentView === View.Graph,
     });
 
-    isRunning = true;
+    setMicActive(true);
     toggleBtn.textContent = "Arrêter";
     statusEl.textContent = "";
     console.log("Listening started successfully!");
@@ -414,7 +416,7 @@ function stopListening() {
   audioContext = null;
 
   smoother.reset();
-  isRunning = false;
+  setMicActive(false);
   toggleBtn.textContent = "Démarrer";
   statusEl.textContent = "Micro inactif";
   freqEl.textContent = "-- Hz";
@@ -627,6 +629,20 @@ let graphAnimationId: number | null = null;
 const widgetEl = document.querySelector(".widget") as HTMLElement;
 
 /**
+ * Met à jour isRunning et reflète l'état sur le widget via la classe
+ * "mic-inactive". Utilisée par le mode compact (voir style.css) pour
+ * substituer la fréquence par le bouton de démarrage quand le micro est
+ * coupé, dans le même emplacement du rang flex.
+ */
+function setMicActive(active: boolean) {
+  isRunning = active;
+  widgetEl.classList.toggle("mic-inactive", !active);
+}
+
+// État initial : micro inactif au chargement.
+widgetEl.classList.add("mic-inactive");
+
+/**
  * Redimensionne la fenêtre native Tauri, ou (en mode navigateur, où il n'y
  * a pas de fenêtre à redimensionner) applique directement la taille au
  * conteneur du widget dans la page.
@@ -640,14 +656,28 @@ async function applyWidgetSize(width: number, height: number) {
   }
 }
 
-// Enum pour les différentes vues
+// Enum pour les différentes vues. Compact est une vue à part entière (et
+// non un flag orthogonal) : ça évite d'avoir deux états à garder
+// synchronisés, et centralise toute la logique de taille/visibilité au
+// même endroit dans showView().
 enum View {
   Main = "main",
   Settings = "settings",
   Graph = "graph",
+  Compact = "compact",
 }
 
 let currentView: View = View.Main;
+
+// Taille de fenêtre associée à chaque vue — une seule table à modifier
+// pour ajuster n'importe quelle taille, plutôt que des valeurs éparpillées
+// dans chaque branche du switch ci-dessous.
+const VIEW_SIZES: Record<View, { width: number; height: number }> = {
+  [View.Main]: { width: 240, height: 140 },
+  [View.Settings]: { width: 270, height: 180 },
+  [View.Graph]: { width: 240, height: 320 },
+  [View.Compact]: { width: 175, height: 46 },
+};
 
 async function showView(view: View) {
   // Arrêter l'animation du graphique si elle tourne
@@ -659,36 +689,49 @@ async function showView(view: View) {
   // Le calcul du spectrogramme (FFT) dans le worklet est coûteux : on ne
   // l'active que lorsque la vue graphique est effectivement affichée, et
   // on le désactive dès qu'on la quitte, quelle que soit la vue de
-  // destination (Main ou Settings).
+  // destination.
   workletNode?.port.postMessage({
     type: "set-spectrogram-enabled",
     enabled: view === View.Graph,
   });
 
-  // Masquer toutes les vues
+  // Masquer toutes les vues. Main et Compact partagent le même balisage
+  // (#main-view) : seule la classe "compact" sur le widget change la
+  // densité d'affichage via CSS (voir style.css, .widget.compact ...).
   mainView.classList.add("hidden");
   settingsView.classList.add("hidden");
   graphView.classList.add("hidden");
+  widgetEl.classList.toggle("compact", view === View.Compact);
 
-  // Afficher la vue demandée et redimensionner
+  // État du bouton compact mis à jour de façon universelle (pas dans le
+  // switch ci-dessous) : sinon, en quittant Compact directement vers
+  // Graph ou Settings (ex: clic sur la fréquence en mode compact), le
+  // bouton restait affiché comme "actif" (⇲) alors qu'on n'est plus en
+  // mode compact.
+  compactBtn.classList.toggle("active", view === View.Compact);
+  compactBtn.textContent = view === View.Compact ? "⇲" : "⇱";
+  compactBtn.title =
+    view === View.Compact ? "Quitter le mode compact" : "Mode compact";
+
   try {
+    const { width, height } = VIEW_SIZES[view];
+    await applyWidgetSize(width, height);
+
     switch (view) {
       case View.Main:
+      case View.Compact:
         mainView.classList.remove("hidden");
         settingsBtn.classList.remove("active");
-        await applyWidgetSize(240, 140);
         break;
-        
+
       case View.Settings:
         settingsView.classList.remove("hidden");
         settingsBtn.classList.add("active");
-        await applyWidgetSize(270, 180);
         break;
-        
+
       case View.Graph:
         graphView.classList.remove("hidden");
         settingsBtn.classList.remove("active");
-        await applyWidgetSize(240, 320);
         // Attendre un peu pour que le DOM se mette à jour
         await new Promise(resolve => setTimeout(resolve, 100));
         // Démarrer l'animation du graphique
@@ -710,6 +753,10 @@ async function showGraphView() {
   await showView(View.Graph);
 }
 
+// Fermer le graphique ramène toujours à la vue principale normale (jamais
+// au mode compact), quelle que soit la vue d'où on venait avant d'ouvrir
+// le graphique — comportement volontairement simple, sans mémorisation
+// d'une "vue précédente".
 async function hideGraphView() {
   await showView(View.Main);
 }
@@ -729,6 +776,10 @@ closeBtn.addEventListener("click", () => {
   if (isTauri) {
     void getCurrentWindow().close();
   }
+});
+
+compactBtn.addEventListener("click", () => {
+  void showView(currentView === View.Compact ? View.Main : View.Compact);
 });
 
 settingsBtn.addEventListener("click", () => {

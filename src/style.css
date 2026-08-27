@@ -17,8 +17,10 @@ body {
 .widget {
   width: 100%;
   height: 100%;
-  min-width: 220px;
-  min-height: 140px;
+  /* Pas de min-width/min-height ici : la taille réelle est désormais
+     entièrement pilotée par VIEW_SIZES (main.ts) via applyWidgetSize(),
+     y compris pour la vue Compact (110x46) qui est plus petite que
+     l'ancien plancher fixe de 220x140 laissé ici par erreur. */
   background: rgba(20, 20, 24, 0.85);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
@@ -71,6 +73,118 @@ body.web-mode .widget {
 #close-btn:hover {
   background: rgba(255, 80, 80, 0.6);
   color: #fff;
+}
+
+#compact-btn {
+  position: absolute;
+  top: 6px;
+  right: 30px;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: #ccc;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+#compact-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+#compact-btn.active {
+  background: #4c8dff;
+  color: #fff;
+}
+
+/* Mode hypercompact : n'affiche plus que la fréquence, en plus petit,
+   avec juste assez de chrome (fermer + toggle compact) pour rester
+   pilotable. Réglages/toggle/statut sont masqués faute de place.
+   Le widget passe en rang flex horizontal (close-btn/compact-btn sont
+   normalement en position absolute, pensés pour flotter au-dessus d'un
+   contenu déjà centré — ça ne marche plus dans une boîte de 46px de
+   haut, d'où le passage à un flex row explicite pour éviter toute
+   superposition). */
+.widget.compact {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px 8px;
+}
+
+.widget.compact #settings-btn,
+.widget.compact #note,
+.widget.compact #toggle-btn,
+.widget.compact #status-display {
+  display: none;
+}
+
+/* Le texte de statut ("Micro inactif") ne rentre pas dans le rang
+   compact — seul le bouton toggle nous intéresse ici, pas cette légende. */
+.widget.compact #status {
+  display: none;
+}
+
+/* On annule le positionnement absolute par défaut pour que ces deux
+   boutons deviennent des éléments normaux du rang flex. */
+.widget.compact #compact-btn,
+.widget.compact #close-btn {
+  position: static;
+  flex-shrink: 0;
+}
+
+.widget.compact #compact-btn {
+  order: 2;
+}
+
+/* #freq est niché dans #main-view > .freq-display, deux niveaux sous
+   .widget. `display: contents` supprime la boîte de ces deux wrappers
+   sans toucher au HTML : leurs enfants (dont #freq) rejoignent
+   directement le rang flex de .widget, au lieu de former leur propre
+   colonne centrée à l'intérieur d'un seul "slot" du rang. */
+.widget.compact #main-view,
+.widget.compact .freq-display {
+  display: contents;
+}
+
+.widget.compact #freq {
+  order: 1;
+  flex: 1;
+  text-align: center;
+  font-size: 18px;
+}
+
+.widget.compact #close-btn {
+  order: 3;
+}
+
+/* Micro inactif : on substitue #freq par le bouton de démarrage, dans le
+   même emplacement du rang flex (même mécanisme display:contents que
+   pour #freq, appliqué ici à #status-display pour laisser #toggle-btn
+   remonter directement dans le rang). La classe "mic-inactive" est
+   pilotée en JS par setMicActive() (voir main.ts). */
+.widget.compact.mic-inactive #freq {
+  display: none;
+}
+
+.widget.compact.mic-inactive #status-display {
+  display: contents;
+}
+
+.widget.compact.mic-inactive #toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  order: 1;
+  flex: 1;
+  padding: 4px 6px;
+  font-size: 11px;
 }
 
 #settings-btn {
