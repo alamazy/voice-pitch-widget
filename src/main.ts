@@ -280,6 +280,16 @@ async function startListening() {
     // onmessage ci-dessus (voir le cas data.type === "config").
     workletNode.port.postMessage({ type: "get-config" });
 
+    // Le nouveau worklet démarre avec le spectrogramme désactivé par
+    // défaut (voir pitch-processor.js) : si l'utilisateur redémarre
+    // l'écoute (stop/start) alors qu'il est déjà sur la vue graphique,
+    // il faut resynchroniser explicitement, sinon le calcul resterait
+    // désactivé sans que l'UI ne s'en aperçoive.
+    workletNode.port.postMessage({
+      type: "set-spectrogram-enabled",
+      enabled: currentView === View.Graph,
+    });
+
     isRunning = true;
     toggleBtn.textContent = "Arrêter";
     statusEl.textContent = "";
@@ -526,6 +536,15 @@ async function showView(view: View) {
     cancelAnimationFrame(graphAnimationId);
     graphAnimationId = null;
   }
+
+  // Le calcul du spectrogramme (FFT) dans le worklet est coûteux : on ne
+  // l'active que lorsque la vue graphique est effectivement affichée, et
+  // on le désactive dès qu'on la quitte, quelle que soit la vue de
+  // destination (Main ou Settings).
+  workletNode?.port.postMessage({
+    type: "set-spectrogram-enabled",
+    enabled: view === View.Graph,
+  });
 
   // Masquer toutes les vues
   mainView.classList.add("hidden");

@@ -163,6 +163,13 @@ class PitchProcessor extends AudioWorkletProcessor {
     this.rmsThreshold = 0.05;
     this.peakThreshold = 0.25;
 
+    // Le calcul du spectre (FFT complète à chaque cycle d'analyse) est la
+    // partie la plus coûteuse du processor. Désactivé par défaut : il n'y
+    // a aucune raison de la faire tourner tant que le spectrogramme n'est
+    // pas affiché à l'écran. L'UI l'active/désactive via un message
+    // "set-spectrogram-enabled" au moment où elle ouvre/ferme cette vue.
+    this.spectrogramEnabled = false;
+
     // On ne recalcule pas à chaque bloc de 128 échantillons (coûteux
     // et inutile) : on lance l'analyse toutes les N frames.
     this.framesSinceAnalysis = 0;
@@ -185,6 +192,8 @@ class PitchProcessor extends AudioWorkletProcessor {
         if (typeof data.peakThreshold === "number") {
           this.peakThreshold = data.peakThreshold;
         }
+      } else if (data.type === "set-spectrogram-enabled") {
+        this.spectrogramEnabled = !!data.enabled;
       } else if (data.type === "get-config") {
         const freqPerBin = sampleRate / this.bufferSize;
         const numSpectrumBins = this.spectrumMaxBin - this.spectrumMinBin + 1;
@@ -372,9 +381,19 @@ class PitchProcessor extends AudioWorkletProcessor {
       );
 
       const frequency = this.autoCorrelate(pitchWindow, sampleRate);
-      const spectrum = this.computeSpectrum(ordered, sampleRate);
 
-      this.port.postMessage({ frequency, spectrum: Array.from(spectrum) });
+      // La FFT (computeSpectrum) est la partie coûteuse : on ne la lance
+      // que si l'UI a explicitement demandé le spectrogramme. Le reste
+      // (détection de note via autoCorrelate) continue de tourner
+      // normalement, ce n'est pas concerné par cette optimisation.
+      const spectrum = this.spectrogramEnabled
+        ? this.computeSpectrum(ordered, sampleRate)
+        : null;
+
+      this.port.postMessage({
+        frequency,
+        spectrum: spectrum ? Array.from(spectrum) : undefined,
+      });
     }
 
     return true; // garde le processor actif
