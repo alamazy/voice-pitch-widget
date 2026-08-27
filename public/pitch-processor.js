@@ -99,13 +99,26 @@ class PitchProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
 
-    // Taille de la fenêtre d'analyse. Doit rester une puissance de 2
-    // (contrainte de la FFT radix-2). 8192 échantillons @48kHz donne une
-    // résolution de sampleRate/8192 ≈ 5.86 Hz par bin, largement de quoi
-    // distinguer des notes vocales adjacentes.
-    this.bufferSize = 8192;
+    // Taille du buffer circulaire / de la FFT. Doit rester une puissance
+    // de 2 (contrainte de la FFT radix-2). 16384 échantillons @48kHz
+    // donne une résolution de sampleRate/16384 ≈ 2.93 Hz par bin pour le
+    // spectrogramme — c'est la RÉELLE résolution fréquentielle (durée du
+    // signal observé), pas un effet de zero-padding.
+    this.bufferSize = 16384;
     this.buffer = new Float32Array(this.bufferSize);
     this.writeIndex = 0;
+
+    // Taille de fenêtre DÉDIÉE à l'autocorrélation (détection de note),
+    // volontairement plus courte que bufferSize : une fenêtre courte
+    // réagit plus vite aux changements de hauteur de voix (meilleure
+    // résolution temporelle / latence perçue plus faible), alors que le
+    // spectrogramme bénéficie au contraire d'une fenêtre longue pour sa
+    // résolution fréquentielle. Les deux usages ont des besoins opposés,
+    // d'où cette séparation : un seul buffer circulaire de taille
+    // bufferSize est conservé (pour la FFT), et l'autocorrélation ne
+    // travaille que sur les `pitchWindowSize` échantillons les plus
+    // récents de ce buffer (voir process()).
+    this.pitchWindowSize = 8192; // ~171ms @48kHz, contre ~342ms pour la FFT
 
     // Buffers réutilisés à chaque frame pour la FFT, alloués une seule
     // fois (éviter toute allocation dans process()/computeSpectrum(),
@@ -124,13 +137,22 @@ class PitchProcessor extends AudioWorkletProcessor {
     }
 
     // Plage de fréquences utile pour le spectrogramme (voix humaine).
+    // Nommées explicitement (plutôt que des magic numbers) car exposées
+    // ensuite à l'UI via le message "get-config" — main.ts n'a ainsi
+    // jamais besoin de deviner/dupliquer ces valeurs.
+    this.spectrumMinFreq = 50;
+    this.spectrumMaxFreq = 450;
+
     // Bins précalculés une fois : `sampleRate` est une constante globale
     // du AudioWorkletGlobalScope, disponible dès le constructeur.
     const freqPerBin = sampleRate / this.bufferSize;
-    this.spectrumMinBin = Math.max(1, Math.floor(50 / freqPerBin));
+    this.spectrumMinBin = Math.max(
+      1,
+      Math.floor(this.spectrumMinFreq / freqPerBin)
+    );
     this.spectrumMaxBin = Math.min(
       this.bufferSize / 2 - 1,
-      Math.ceil(450 / freqPerBin)
+      Math.ceil(this.spectrumMaxFreq / freqPerBin)
     );
 
     // Seuils configurables en live depuis l'UI (voir onmessage plus bas).
@@ -147,17 +169,44 @@ class PitchProcessor extends AudioWorkletProcessor {
     this.analysisIntervalFrames = 8; // ~toutes les 8*128 = 1024 échantillons
 
     // Permet à l'UI (main.ts) d'ajuster les seuils en live, sans recharger
-    // le worklet. Message attendu :
+    // le worklet, et de récupérer la configuration réelle du processor
+    // (tailles de fenêtre, plage spectrale, sampleRate...) au lieu de la
+    // dupliquer en dur côté UI. Messages attendus :
     // { type: "update-thresholds", rmsThreshold, peakThreshold }
+    // { type: "get-config" } -> répond avec { type: "config", ... }
     this.port.onmessage = (event) => {
       const data = event.data;
-      if (data && data.type === "update-thresholds") {
+      if (!data) return;
+
+      if (data.type === "update-thresholds") {
         if (typeof data.rmsThreshold === "number") {
           this.rmsThreshold = data.rmsThreshold;
         }
         if (typeof data.peakThreshold === "number") {
           this.peakThreshold = data.peakThreshold;
         }
+      } else if (data.type === "get-config") {
+        const freqPerBin = sampleRate / this.bufferSize;
+        const numSpectrumBins = this.spectrumMaxBin - this.spectrumMinBin + 1;
+        this.port.postMessage({
+          type: "config",
+          sampleRate,
+          bufferSize: this.bufferSize,
+          pitchWindowSize: this.pitchWindowSize,
+          freqPerBin,
+          spectrumMinFreq: this.spectrumMinFreq,
+          spectrumMaxFreq: this.spectrumMaxFreq,
+          spectrumMinBin: this.spectrumMinBin,
+          spectrumMaxBin: this.spectrumMaxBin,
+          numSpectrumBins,
+          // Fréquences RÉELLES couvertes par le spectre renvoyé (alignées
+          // sur les bins, donc potentiellement légèrement différentes de
+          // spectrumMinFreq/spectrumMaxFreq à cause de l'arrondi Math.floor/
+          // Math.ceil ci-dessus) — c'est ce que l'UI doit utiliser pour un
+          // rendu pixel-perfect du spectrogramme.
+          spectrumStartFreq: this.spectrumMinBin * freqPerBin,
+          spectrumEndFreq: (this.spectrumMaxBin + 1) * freqPerBin,
+        });
       }
     };
   }
@@ -192,8 +241,18 @@ class PitchProcessor extends AudioWorkletProcessor {
     const n = trimmed.length;
     if (n < 512) return -1;
 
-    const c = new Float32Array(n);
-    for (let lag = 0; lag < n; lag++) {
+    // On ne calcule l'autocorrélation que pour les lags correspondant à
+    // des fréquences plausibles (jusqu'à 50 Hz minimum), au lieu de 0..n.
+    // Sans cette borne, le coût grimpe en O(n²) — critique une fois
+    // bufferSize augmenté (16384² ≈ 134M opérations/appel, bien trop
+    // lourd pour le thread audio). Borné ainsi, le coût devient
+    // O(n * maxLag), stable même si bufferSize augmente encore à l'avenir.
+    // (La borne haute en fréquence, 1000 Hz, est déjà appliquée plus bas
+    // via le filtre final sur `frequency`.)
+    const maxLag = Math.min(n - 1, Math.ceil(sampleRate / 50)); // 50 Hz
+
+    const c = new Float32Array(maxLag + 1);
+    for (let lag = 0; lag <= maxLag; lag++) {
       let sum = 0;
       for (let i = 0; i < n - lag; i++) {
         sum += trimmed[i] * trimmed[i + lag];
@@ -203,12 +262,13 @@ class PitchProcessor extends AudioWorkletProcessor {
 
     // On cherche le premier minimum local après lag=0, puis le maximum
     // qui suit : c'est la signature classique d'une périodicité.
+    // Bornes adaptées à la taille réelle de `c` (maxLag+1, plus n).
     let d = 0;
-    while (d < n - 1 && c[d] > c[d + 1]) d++;
+    while (d < maxLag && c[d] > c[d + 1]) d++;
 
     let maxVal = -1;
     let maxPos = -1;
-    for (let i = d; i < n; i++) {
+    for (let i = d; i <= maxLag; i++) {
       if (c[i] > maxVal) {
         maxVal = c[i];
         maxPos = i;
@@ -220,7 +280,7 @@ class PitchProcessor extends AudioWorkletProcessor {
     // Interpolation parabolique autour du pic pour affiner la précision.
     let period = maxPos;
     const x0 = maxPos < 1 ? maxPos : maxPos - 1;
-    const x2 = maxPos + 1 < n ? maxPos + 1 : maxPos;
+    const x2 = maxPos + 1 <= maxLag ? maxPos + 1 : maxPos;
     if (x0 !== maxPos && x2 !== maxPos) {
       const a = c[x0];
       const b = c[maxPos];
@@ -273,7 +333,7 @@ class PitchProcessor extends AudioWorkletProcessor {
         ) / fftSize;
       // Amplification et limitation (mise à l'échelle empirique pour un
       // rendu lisible dans le spectrogramme, comme dans la version précédente).
-      spectrum[i] = Math.max(0, Math.min(1, magnitude * 10));
+      spectrum[i] = Math.max(0, Math.min(1, magnitude * 50));
     }
 
     return spectrum;
@@ -295,13 +355,23 @@ class PitchProcessor extends AudioWorkletProcessor {
     if (this.framesSinceAnalysis >= this.analysisIntervalFrames) {
       this.framesSinceAnalysis = 0;
 
-      // Réordonne le buffer circulaire en ordre chronologique avant analyse.
+      // Réordonne le buffer circulaire complet en ordre chronologique.
+      // Cette version longue est celle utilisée pour la FFT/spectrogramme.
       const ordered = new Float32Array(this.bufferSize);
       for (let i = 0; i < this.bufferSize; i++) {
         ordered[i] = this.buffer[(this.writeIndex + i) % this.bufferSize];
       }
 
-      const frequency = this.autoCorrelate(ordered, sampleRate);
+      // `subarray` crée une VUE (pas une copie) sur les `pitchWindowSize`
+      // échantillons les plus récents de `ordered` — donc gratuit en
+      // termes d'allocation. L'autocorrélation travaille ainsi sur une
+      // fenêtre plus courte et plus récente que la FFT, pour une
+      // détection de note plus réactive.
+      const pitchWindow = ordered.subarray(
+        this.bufferSize - this.pitchWindowSize
+      );
+
+      const frequency = this.autoCorrelate(pitchWindow, sampleRate);
       const spectrum = this.computeSpectrum(ordered, sampleRate);
 
       this.port.postMessage({ frequency, spectrum: Array.from(spectrum) });

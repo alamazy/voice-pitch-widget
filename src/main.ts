@@ -24,6 +24,25 @@ const presetFemaleBtn = document.getElementById("preset-female-btn") as HTMLButt
 
 const SETTINGS_STORAGE_KEY = "voice-pitch-widget:thresholds";
 
+// Configuration réelle du pitch-processor, récupérée dynamiquement via le
+// message "get-config" (voir startListening) plutôt que dupliquée en dur
+// ici. Reste `null` tant qu'elle n'a pas encore été reçue (ex: avant le
+// tout premier démarrage de l'écoute).
+interface ProcessorConfig {
+  sampleRate: number;
+  bufferSize: number;
+  pitchWindowSize: number;
+  freqPerBin: number;
+  spectrumMinFreq: number;
+  spectrumMaxFreq: number;
+  spectrumMinBin: number;
+  spectrumMaxBin: number;
+  numSpectrumBins: number;
+  spectrumStartFreq: number;
+  spectrumEndFreq: number;
+}
+let processorConfig: ProcessorConfig | null = null;
+
 // Historique des fréquences pour le graphique spectral
 interface PitchDataPoint {
   timestamp: number;
@@ -182,8 +201,19 @@ async function startListening() {
     workletNode = new AudioWorkletNode(audioContext, "pitch-processor");
     console.log("AudioWorkletNode created");
 
-    workletNode.port.onmessage = (event: MessageEvent<{ frequency: number; spectrum?: number[] }>) => {
-      const { frequency, spectrum } = event.data;
+    workletNode.port.onmessage = (event: MessageEvent<{ type?: string; frequency?: number; spectrum?: number[]; [key: string]: unknown }>) => {
+      const data = event.data;
+
+      // Réponse à notre demande "get-config" : on la stocke et on
+      // s'arrête là, ce n'est pas une mesure de fréquence.
+      if (data.type === "config") {
+        processorConfig = data as unknown as ProcessorConfig;
+        console.log("Configuration reçue du processor :", processorConfig);
+        return;
+      }
+
+      const { frequency, spectrum } = data;
+      if (typeof frequency !== "number") return;
       const now = Date.now();
       
       if (frequency > 0) {
@@ -244,6 +274,12 @@ async function startListening() {
       peakThreshold: currentThresholds.peakThreshold,
     });
 
+    // Récupère la configuration réelle du processor (tailles de buffer,
+    // plage spectrale, sampleRate...) au lieu de la deviner/dupliquer en
+    // dur côté UI. La réponse arrive de façon asynchrone via le handler
+    // onmessage ci-dessus (voir le cas data.type === "config").
+    workletNode.port.postMessage({ type: "get-config" });
+
     isRunning = true;
     toggleBtn.textContent = "Arrêter";
     statusEl.textContent = "";
@@ -297,21 +333,25 @@ function drawPitchGraph() {
     return;
   }
 
-  // Limites de fréquence fixes pour l'affichage du spectrogramme (toujours 50-450)
-  const minFreq = 50;
-  const maxFreq = 450;
+  // Limites de fréquence pour l'affichage du spectrogramme : dérivées de
+  // la config réelle du processor (spectrumStartFreq/spectrumEndFreq,
+  // alignées exactement sur les bins renvoyés), avec un repli sur les
+  // valeurs nominales 50-450 Hz UNIQUEMENT si la config n'a pas encore
+  // été reçue (ex: graphique ouvert avant le tout premier démarrage).
+  const minFreq = processorConfig?.spectrumStartFreq ?? 50;
+  const maxFreq = processorConfig?.spectrumEndFreq ?? 450;
 
   const now = Date.now();
   const timeRange = MAX_HISTORY_DURATION; // Fenêtre fixe de 30 secondes
 
-  // Dessiner le spectrogramme en arrière-plan
-  const fftSize = 8192; // Doit correspondre à la taille FFT du worklet
-  const sampleRate = 48000; // Estimation du sample rate
-  const freqPerBin = sampleRate / fftSize; // ~5.86 Hz par bin
-  
-  // Le spectre retourné commence à 50 Hz
-  const spectrumMinFreq = 50;
-  
+  // Résolution fréquentielle du spectrogramme et fréquence du premier bin
+  // renvoyé par le processor : lues depuis processorConfig plutôt que
+  // recalculées à partir de constantes dupliquées ici (fftSize,
+  // sampleRate...). Repli sur les mêmes valeurs par défaut que le
+  // processor si la config n'est pas encore disponible.
+  const freqPerBin = processorConfig?.freqPerBin ?? 48000 / 16384;
+  const spectrumMinFreq = processorConfig?.spectrumStartFreq ?? 50;
+
   for (const point of pitchHistory) {
     if (!point.spectrum || point.spectrum.length === 0) continue;
     
