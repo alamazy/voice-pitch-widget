@@ -30,10 +30,11 @@ Widget desktop (Tauri) toujours au premier plan, qui détecte en temps réel la 
 - **Sauvegarde automatique** : Tous les réglages sont persistants (localStorage)
 
 ### 🪟 Interface adaptative
-- **3 vues distinctes** :
-  - **Principale** (240×160) : Affichage de la fréquence et note
-  - **Réglages** (270×180) : Paramètres ajustables en temps réel
-  - **Graphique** (240×320) : Spectrogramme avec historique 30s
+- **4 vues distinctes** :
+  - **Principale** : Affichage de la fréquence et note
+  - **Compacte** : Affichage uniquement de la fréquence
+  - **Réglages** : Paramètres ajustables en temps réel
+  - **Graphique** : Spectrogramme avec historique 30s
 - **Fenêtre flottante** : Toujours au premier plan, transparente, déplaçable
 - **Sans décoration** : Interface épurée sans barre de titre système
 - **Redimensionnement dynamique** : La fenêtre s'adapte automatiquement à la vue
