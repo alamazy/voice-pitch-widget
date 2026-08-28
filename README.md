@@ -4,7 +4,7 @@ Widget desktop (Tauri) toujours au premier plan, qui détecte en temps réel la 
 
 ## Téléchargement
 
-### --> [Téléchargement de la dernière version](https://github.com/alamazy/voice-pitch-widget/releases) <-- (Testé uniquement sur windows pour le moment)
+### --> [Téléchargement de la dernière version](https://github.com/alamazy/voice-pitch-widget/releases/tag/v0.2.2) <-- (Testé uniquement sur windows pour le moment)
 
 ### --> [Accès à la démonstration live dans votre navigateur](https://alamazy.github.io/voice-pitch-widget/) <--
 
