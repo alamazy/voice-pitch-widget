@@ -102,7 +102,7 @@ En plus du build Tauri, le même code fonctionne comme simple page web (sans ins
 ## Points techniques
 
 #### Windows WebView2
-L'application nécessite WebView2 Runtime. La configuration `fixedRuntime` nécessite le téléchargement préalable de WebView2 fixed version sur le site de Microsoft https://developer.microsoft.com/en-us/microsoft-edge/webview2/#download-section puis la décompresser avec la commande suivante: `Expand .\Microsoft.WebView2.FixedVersionRuntime.128.0.2739.42.x64.cab -F:* ./src-tauri`
+L'application nécessite WebView2 Runtime. La configuration par défaut téléchargera automatiquement WebView2 si nécessaire
 
 #### macOS
 L'accès au micro nécessite `NSMicrophoneUsageDescription` dans `Info.plist` (géré automatiquement par Tauri 2.x)

@@ -1,6 +1,6 @@
 [package]
 name = "voice-pitch-widget"
-version = "0.1.0"
+version = "0.2.1"
 description = "Widget de détection de hauteur de voix, toujours au premier plan"
 edition = "2021"
 
