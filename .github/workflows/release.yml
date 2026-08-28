@@ -3,7 +3,9 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'  # Déclenché quand tu pousses un tag comme v0.2.2
+      - 'v*'
+    branches:  # <-- Ajoute cette section
+      - test-workflow  # <-- Déclenche sur push vers test-workflow
   workflow_dispatch:
   
 jobs:
