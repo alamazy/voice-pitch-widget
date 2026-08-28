@@ -2,7 +2,9 @@
 
 Widget desktop (Tauri) toujours au premier plan, qui détecte en temps réel la fréquence fondamentale (F0) de la voix captée par le microphone et affiche la note correspondante avec visualisation spectrogramme.
 
-## Démo navigateur
+## Téléchargement
+
+### --> [Téléchargement de la dernière version](https://github.com/alamazy/voice-pitch-widget/releases/tag/v0.2.1) <-- (Windows uniquement pour le moment)
 
 ### --> [Accès à la démonstration live dans votre navigateur](https://alamazy.github.io/voice-pitch-widget/) <--
 
